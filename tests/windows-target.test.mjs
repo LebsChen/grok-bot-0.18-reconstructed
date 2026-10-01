@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -104,4 +106,52 @@ test("devbox-connect capability extraction", async () => {
   assert.equal(calls[0].url, "https://app.example/api/preview-link/devin-1?local_port=1341");
   assert.equal(calls[0].options.method, "PUT");
   assert.equal(calls[0].options.headers.Authorization, "Bearer key");
+});
+
+test("archive entry listing normalizes win32-style separator entries", async () => {
+  const { archiveFileEntries, normalizeArchiveRelative } = await import("../scripts/lib/asar-integrity.mjs");
+  assert.equal(normalizeArchiveRelative("\\dist\\deps\\x.js"), "dist/deps/x.js");
+  assert.equal(normalizeArchiveRelative("/dist/deps/x.js"), "dist/deps/x.js");
+  assert.equal(normalizeArchiveRelative("dist/deps/x.js"), "dist/deps/x.js");
+
+  const statCalls = [];
+  const entries = await archiveFileEntries("fake.asar", {
+    listPackageImpl: () => [
+      "\\dist\\deps\\x.js",
+      "\\package.json",
+      "\\dist\\deps", // directory entry: statFile returns no size
+    ],
+    statFileImpl: (_archive, p) => {
+      statCalls.push(p);
+      if (p.endsWith("deps")) return { files: {} };
+      return { size: 3, integrity: { hash: "h" } };
+    },
+  });
+  assert.deepEqual([...entries.keys()].sort(), ["dist/deps/x.js", "package.json"]);
+  assert.ok(entries.get("dist/deps/x.js").size === 3);
+  // statFile must receive a path.sep-joined path for its win32 traversal.
+  assert.ok(statCalls.every(p => p === p.split("/").join(path.sep)));
+});
+
+test("integrity check still reports missing-archive-entry on real drift", async () => {
+  const { verifyStagedPackageIntegrity } = await import("../scripts/lib/asar-integrity.mjs");
+  const stageRoot = mkdtempSync(path.join(tmpdir(), "grok-bot-stage-"));
+  try {
+    writeFileSync(path.join(stageRoot, "a.txt"), "payload");
+    const sha256 = b => createHash("sha256").update(b).digest("hex");
+    const before = new Map([["a.txt", { bytes: 7, sha256: sha256("payload") }]]);
+    // Archive listing that lacks the staged file -> missing-archive-entry.
+    await assert.rejects(
+      verifyStagedPackageIntegrity({
+        stageRoot,
+        archivePath: "fake.asar",
+        unpackedRoot: "fake.unpacked",
+        before,
+        archiveEntriesImpl: async () => new Map(),
+      }),
+      /"relative":"a\.txt","kind":"missing-archive-entry"/,
+    );
+  } finally {
+    rmSync(stageRoot, { recursive: true, force: true });
+  }
 });
