@@ -1,100 +1,111 @@
-// Connect the Windows build to a DevBox session's box host: mint
-// preview-link capabilities for ports 1340/1341, read the descriptor
-// for the gateway token, then launch `Grok Bot.exe` with the gateway
-// env. Token values are never logged.
-import { spawn } from "node:child_process";
+// Launch Grok Bot against the DevBox plugin/bot desktop backend.
+// Starts `python -m devbox_bot.desktop` on 127.0.0.1:7811 (DEVBOX_BOT_DIR
+// points at a DevBox plugin/bot checkout), waits for /healthz, then
+// launches `Grok Bot.exe` with the backend/website env pointed at the
+// local backend. Legacy SAND_HOST_GATEWAY_* env still works as a debug
+// fallback — if it is already set we keep it and skip the local backend.
+import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { windowsOutputApp } from "./lib/config.mjs";
 
-export function capabilityFromUrl(rawUrl) {
-  const parsed = new URL(rawUrl);
-  const token = parsed.searchParams.get("tkn");
-  return { capability: token, baseUrl: `${parsed.origin}${parsed.pathname}` };
-}
-
-export function capabilityFromResponse(body) {
-  if (body.token) {
-    return { capability: body.token, baseUrl: (body.url ?? "").split("?")[0].split("#")[0].replace(/\/$/, "") };
-  }
-  return capabilityFromUrl(body.url ?? "");
-}
-
-export async function mintPreviewLink({ origin, sessionId, apiKey, localPort, fetchImpl = fetch }) {
-  const url = `${origin}/api/preview-link/${sessionId}?local_port=${localPort}`;
-  const response = await fetchImpl(url, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  if (!response.ok) {
-    throw new Error(`preview-link port ${localPort} failed: HTTP ${response.status}`);
-  }
-  const body = await response.json();
-  const { capability, baseUrl } = capabilityFromResponse(body);
-  if (!capability) {
-    throw new Error(`preview-link port ${localPort} returned no capability; keys: ${Object.keys(body).join(", ")}`);
-  }
-  return { capability, baseUrl };
-}
-
-export async function fetchDescriptor({ descriptorBase, capability, fetchImpl = fetch }) {
-  const response = await fetchImpl(`${descriptorBase}/descriptor`, {
-    headers: { "x-anyrun-network-token": capability },
-  });
-  if (!response.ok) {
-    throw new Error(`descriptor fetch failed: HTTP ${response.status}`);
-  }
-  return response.json();
-}
+const DESKTOP_PORT = Number(process.env.DEVBOX_BOT_PORT || 7811);
+const DESKTOP_URL = `http://127.0.0.1:${DESKTOP_PORT}`;
 
 function parseArgs(argv) {
-  const options = { printEnvOnly: false };
+  const options = { printEnvOnly: false, port: DESKTOP_PORT };
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === "--origin") options.origin = argv[++index];
-    else if (argv[index] === "--session") options.sessionId = argv[++index];
+    if (argv[index] === "--bot-dir") options.botDir = argv[++index];
     else if (argv[index] === "--app") options.app = argv[++index];
+    else if (argv[index] === "--port") options.port = Number(argv[++index]);
     else if (argv[index] === "--print-env-only") options.printEnvOnly = true;
     else throw new Error(`unknown argument: ${argv[index]}`);
   }
   return options;
 }
 
+function findPython() {
+  for (const cmd of ["python", "python3", "py"]) {
+    const probe = spawnSync(cmd, ["--version"], { stdio: "pipe" });
+    if (probe.status === 0) return cmd;
+  }
+  throw new Error("python not found on PATH (need Python 3.11+)");
+}
+
+function findBotDir(option) {
+  const candidates = [
+    option,
+    process.env.DEVBOX_BOT_DIR,
+    path.resolve(process.cwd(), "devbox-bot"),
+    path.resolve(process.cwd(), "..", "DevBox", "plugin", "bot"),
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, "devbox_bot", "desktop.py"))) return dir;
+  }
+  throw new Error(
+    "plugin/bot checkout not found; set DEVBOX_BOT_DIR or --bot-dir");
+}
+
+async function waitForHealth(url, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "";
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${url}/healthz`);
+      if (response.ok) return;
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = String(error?.message ?? error);
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`desktop backend did not become healthy: ${lastError}`);
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const origin = options.origin ?? process.env.DEVBOX_ORIGIN ?? "https://app.devinai.net";
-  const sessionId = options.sessionId ?? process.env.DEVBOX_SESSION_ID;
-  const apiKey = process.env.DEVBOX_API_KEY;
-  if (!sessionId) throw new Error("--session or DEVBOX_SESSION_ID is required");
-  if (!apiKey) throw new Error("DEVBOX_API_KEY is required");
+  const port = options.port || DESKTOP_PORT;
+  const url = `http://127.0.0.1:${port}`;
   const appExe = options.app ?? path.join(windowsOutputApp, "Grok Bot.exe");
 
-  const gateway = await mintPreviewLink({ origin, sessionId, apiKey, localPort: 1340 });
-  const descriptor = await mintPreviewLink({ origin, sessionId, apiKey, localPort: 1341 });
-  const descriptorPayload = await fetchDescriptor({
-    descriptorBase: descriptor.baseUrl,
-    capability: descriptor.capability,
-  });
-  if (!descriptorPayload.gatewayToken) {
-    throw new Error("descriptor response had no gatewayToken");
+  const env = {};
+  if (process.env.SAND_HOST_GATEWAY_URL) {
+    // debug fallback: caller pinned an explicit gateway
+    env.SAND_HOST_GATEWAY_URL = process.env.SAND_HOST_GATEWAY_URL;
+    env.SAND_HOST_GATEWAY_TOKEN = process.env.SAND_HOST_GATEWAY_TOKEN ?? "";
+    env.SAND_HOST_GATEWAY_NETWORK_TOKEN =
+      process.env.SAND_HOST_GATEWAY_NETWORK_TOKEN ?? "";
+    console.log("Using pinned SAND_HOST_GATEWAY_* env (debug fallback)");
+  } else {
+    const botDir = findBotDir(options.botDir);
+    const python = findPython();
+    const reqs = path.join(botDir, "requirements.txt");
+    if (fs.existsSync(reqs)) {
+      spawnSync(python, ["-m", "pip", "install", "--user", "-r", reqs],
+        { stdio: "inherit" });
+    }
+    const backendEnv = {
+      ...process.env,
+      PYTHONPATH: botDir,
+      DEVBOX_ORIGIN: process.env.DEVBOX_ORIGIN ?? "https://app.devinai.net",
+    };
+    console.log(`Starting devbox_bot.desktop from ${botDir} on :${port}`);
+    const child = spawn(python,
+      ["-m", "devbox_bot.desktop", "--port", String(port)], {
+        detached: true, stdio: "inherit", env: backendEnv,
+      });
+    child.unref();
+    await waitForHealth(url);
+    env.SAND_BACKEND_URL = url;
+    env.CURSOR_API_BASE_URL = url;
+    env.SAND_CURSOR_WEBSITE_URL = url;
   }
-
-  const health = await fetch(`${gateway.baseUrl}/health`, {
-    headers: { "x-anyrun-network-token": gateway.capability },
-  });
-  if (!health.ok) {
-    throw new Error(`gateway /health failed: HTTP ${health.status}`);
-  }
-
-  const env = {
-    SAND_HOST_GATEWAY_URL: gateway.baseUrl.replace(/\/$/, ""),
-    SAND_HOST_GATEWAY_TOKEN: descriptorPayload.gatewayToken,
-    SAND_HOST_GATEWAY_NETWORK_TOKEN: gateway.capability,
-  };
   if (options.printEnvOnly) {
     for (const name of Object.keys(env)) console.log(`${name}=<redacted>`);
     return;
   }
-  console.log(`Launching ${appExe} against the session gateway (env redacted)`);
+  console.log(`Launching ${appExe} against local DevBox backend ${url}`);
   const child = spawn(appExe, [], {
     detached: true,
     stdio: "inherit",

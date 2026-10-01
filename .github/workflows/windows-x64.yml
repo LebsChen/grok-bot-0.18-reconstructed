@@ -33,6 +33,15 @@ jobs:
           DEVBOX_SESSION_ID: ${{ inputs.session_id }}
           DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
         run: node scripts/ci/devbox-gateway-smoke.mjs gateway-smoke.json
+      - name: DevBox backend smoke (plugin/bot)
+        if: github.event_name == 'workflow_dispatch' && inputs.session_id != ''
+        env:
+          DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}/devbox-bot
+        run: node scripts/ci/devbox-backend-smoke.mjs backend-smoke.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Launch smoke (CDP screenshot)
         shell: pwsh
         run: |
@@ -67,3 +76,4 @@ jobs:
             window-connected.png
             window-connected.json
             gateway-smoke.json
+            backend-smoke.json
