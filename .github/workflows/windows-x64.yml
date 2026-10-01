@@ -41,6 +41,7 @@ jobs:
           DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
           PYTHONPATH: ${{ github.workspace }}/devbox-bot
           DEVBOX_ORIGIN: http://127.0.0.1:7811
+          GROKBOT_BOX_DEADLINE_S: "600"
         run: |
           if (-not $env:DEVBOX_API_KEY) { Write-Host "DEVBOX_API_KEY secret absent; skipping"; exit 0 }
           python -m pip install -r devbox-bot/requirements.txt
