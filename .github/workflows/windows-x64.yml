@@ -60,6 +60,13 @@ jobs:
             }
             if (-not $ok) { throw "devbox_bot.desktop did not come up on :7811" }
             node backend-smoke-bundle.mjs backend-smoke.json
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "--- backend-bot-err.log ---"
+              Get-Content backend-bot-err.log -ErrorAction SilentlyContinue
+              Write-Host "--- backend-bot.log ---"
+              Get-Content backend-bot.log -ErrorAction SilentlyContinue
+              throw "backend smoke failed"
+            }
           } finally {
             Stop-Process -Id $bot.Id -Force -ErrorAction SilentlyContinue
           }
@@ -129,5 +136,7 @@ jobs:
             window-connected.json
             gateway-smoke.json
             backend-smoke.json
+            backend-bot.log
+            backend-bot-err.log
             desktop-bot.log
             desktop-bot-err.log
