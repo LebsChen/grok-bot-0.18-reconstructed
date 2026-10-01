@@ -43,7 +43,10 @@ jobs:
         run: |
           if (-not $env:DEVBOX_API_KEY) { Write-Host "DEVBOX_API_KEY secret absent; skipping"; exit 0 }
           python -m pip install -r devbox-bot/requirements.txt
-          node scripts/ci/devbox-backend-smoke.mjs backend-smoke.json
+          node_modules/.bin/esbuild scripts/ci/devbox-backend-smoke.mjs `
+            --bundle --platform=node --format=esm --packages=external `
+            --outfile=backend-smoke-bundle.mjs
+          node backend-smoke-bundle.mjs backend-smoke.json
       - name: Launch smoke (devbox_bot.desktop + CDP sign-in)
         shell: pwsh
         env:
