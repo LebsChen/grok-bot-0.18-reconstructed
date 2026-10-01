@@ -41,6 +41,7 @@ from pathlib import Path
 from .codec import ConnectError
 from .connect import ConnectRouter, serve
 from .devbox_api import DEFAULT_AUTH_ORIGIN, DEFAULT_ORIGIN, DevBoxApi
+from .handlers import register
 from .inference import stream_inference
 
 log = logging.getLogger("devbox_bot.desktop")
@@ -216,6 +217,12 @@ class DesktopBackend:
     # ── Connect handlers ──────────────────────────────────────────
     def router(self) -> ConnectRouter:
         r = ConnectRouter()
+        # shared account handlers for methods we don't override below
+        # (privacy mode, managed skills, plugins, MCP, Statsig, …)
+        register(
+            r,
+            lambda ctx: self._identity(self.api_for(ctx)),
+            self._catalog)
 
         @r.unary("aiserver.v1.DashboardService", "GetMe")
         def _get_me(_req, ctx):
@@ -370,6 +377,12 @@ class DesktopBackend:
                  "value": inference_credential, "is_sensitive": True},
                 {"key": "GROKBOT_RUNTIME_URL",
                  "value": runtime_url, "is_sensitive": False},
+                {"key": "GROKBOT_USER_JSON",
+                 "value": json.dumps({
+                     "user_id": ident.get("user_id") or "",
+                     "org_id": org_id or "",
+                     "name": ident.get("name") or "",
+                 }), "is_sensitive": False},
             ] + ([
                 {"key": "DEVBOX_HARNESS_LLM_TOKEN",
                  "value": os.environ.get("GROKBOT_ASSET_TOKEN", ""),

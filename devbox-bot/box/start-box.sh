@@ -130,16 +130,18 @@ fi
 # ── devbox_bot.box (inference endpoint) ─────────────────────────────
 if ! curl -fsS -o /dev/null "http://127.0.0.1:7812/healthz" \
     2>/dev/null; then
-  setsid env \
-    GROKBOT_INFERENCE_CREDENTIAL="$GROKBOT_INFERENCE_CREDENTIAL" \
-    GROKBOT_GATEWAY_TOKEN="$GROKBOT_GATEWAY_TOKEN" \
-    GROKBOT_LLM_BASE_URL="${GROKBOT_LLM_BASE_URL:-}" \
-    GROKBOT_LLM_API_KEY="${GROKBOT_LLM_API_KEY:-}" \
-    GROKBOT_LLM_MODEL="${GROKBOT_LLM_MODEL:-}" \
-    DEVIN_SESSION_ID="${DEVIN_SESSION_ID:-box}" \
-    PYTHONPATH="$PACK_DIR" \
-    "$PY" -m devbox_bot.box --port 7812 \
-    >>"$LOG_DIR/box.log" 2>&1 < /dev/null &
+  (  # secrets exported, never on the env argv (visible via /proc)
+    export GROKBOT_INFERENCE_CREDENTIAL="$GROKBOT_INFERENCE_CREDENTIAL"
+    export GROKBOT_GATEWAY_TOKEN="$GROKBOT_GATEWAY_TOKEN"
+    export GROKBOT_LLM_BASE_URL="${GROKBOT_LLM_BASE_URL:-}"
+    export GROKBOT_LLM_API_KEY="${GROKBOT_LLM_API_KEY:-}"
+    export GROKBOT_LLM_MODEL="${GROKBOT_LLM_MODEL:-}"
+    export GROKBOT_USER_JSON="${GROKBOT_USER_JSON:-}"
+    export DEVIN_SESSION_ID="${DEVIN_SESSION_ID:-box}"
+    export PYTHONPATH="$PACK_DIR"
+    exec setsid "$PY" -m devbox_bot.box --port 7812 \
+      >>"$LOG_DIR/box.log" 2>&1 < /dev/null
+  ) &
   echo "start-box: devbox_bot.box pid $!"
 fi
 
@@ -162,22 +164,21 @@ fi
 
 if ! curl -fsS -o /dev/null "http://127.0.0.1:1340/health" \
     2>/dev/null; then
-  setsid env \
-    SAND_PACKAGED=1 \
-    SAND_HOST_IN_BOX=1 \
-    SAND_BOX_AUTO_UPDATE=0 \
-    SAND_DATA_ROOT="$SAND_DATA_ROOT" \
-    SAND_HOST_PORT=1340 \
-    SAND_GATEWAY_BIND_HOST=0.0.0.0 \
-    SAND_GATEWAY_REQUIRE_AUTH=1 \
-    SAND_GATEWAY_TOKEN="$GROKBOT_GATEWAY_TOKEN" \
-    SAND_BACKEND_URL="http://127.0.0.1:7812" \
-    CURSOR_API_BASE_URL="http://127.0.0.1:7812" \
-    SAND_INFERENCE_RENEWAL_CREDENTIAL="$GROKBOT_INFERENCE_CREDENTIAL" \
-    NODE_PATH="$PACK_DIR/node_modules" \
-    SAND_TREE_SITTER_NODE_DEPS="$PACK_DIR/node_modules" \
-    node "$HOST_MAIN" \
-    >>"$LOG_DIR/host-main.log" 2>&1 < /dev/null &
+  (  # secrets exported, never on the env argv (visible via /proc)
+    export SAND_PACKAGED=1 SAND_HOST_IN_BOX=1 SAND_BOX_AUTO_UPDATE=0
+    export SAND_DATA_ROOT="$SAND_DATA_ROOT"
+    export SAND_HOST_PORT=1340
+    export SAND_GATEWAY_BIND_HOST=0.0.0.0
+    export SAND_GATEWAY_REQUIRE_AUTH=1
+    export SAND_GATEWAY_TOKEN="$GROKBOT_GATEWAY_TOKEN"
+    export SAND_BACKEND_URL="http://127.0.0.1:7812"
+    export CURSOR_API_BASE_URL="http://127.0.0.1:7812"
+    export SAND_INFERENCE_RENEWAL_CREDENTIAL="$GROKBOT_INFERENCE_CREDENTIAL"
+    export NODE_PATH="$PACK_DIR/node_modules"
+    export SAND_TREE_SITTER_NODE_DEPS="$PACK_DIR/node_modules"
+    exec setsid node "$HOST_MAIN" \
+      >>"$LOG_DIR/host-main.log" 2>&1 < /dev/null
+  ) &
   echo "start-box: host-main pid $!"
 fi
 

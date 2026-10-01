@@ -29,6 +29,7 @@ import urllib.parse
 
 from .codec import ConnectError
 from .connect import ConnectRouter, serve
+from .handlers import models_from_env, register
 from .inference import stream_inference
 
 log = logging.getLogger("devbox_bot.box")
@@ -53,6 +54,11 @@ class BoxBackend:
             os.environ.get("GROKBOT_LLM_MODEL_MAP", "{}") or "{}")
         self.signing_secret = secrets.token_bytes(32)
         self.session_id = os.environ.get("DEVIN_SESSION_ID", "box")
+        try:
+            self.user = json.loads(
+                os.environ.get("GROKBOT_USER_JSON", "{}") or "{}")
+        except json.JSONDecodeError:
+            self.user = {}
 
     def _issue_access_token(self) -> dict:
         now = int(time.time())
@@ -118,6 +124,12 @@ class BoxBackend:
         def _noop2(_req, _ctx):
             return {}
 
+        def _identity(_ctx):
+            self._check_bearer(_ctx)
+            return self.user
+
+        register(r, _identity,
+                 lambda: models_from_env(llm_model=self.llm_model))
         return r
 
     def extra_routes(self) -> dict:
