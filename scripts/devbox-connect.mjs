@@ -10,6 +10,47 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { windowsOutputApp } from "./lib/config.mjs";
 
+// ── gateway helpers (debug fallback + tests + gateway smoke) ────────
+export function capabilityFromUrl(rawUrl) {
+  const parsed = new URL(rawUrl);
+  const token = parsed.searchParams.get("tkn");
+  return { capability: token, baseUrl: `${parsed.origin}${parsed.pathname}` };
+}
+
+export function capabilityFromResponse(body) {
+  if (body.token) {
+    return { capability: body.token, baseUrl: (body.url ?? "").split("?")[0].split("#")[0].replace(/\/$/, "") };
+  }
+  return capabilityFromUrl(body.url ?? "");
+}
+
+export async function mintPreviewLink({ origin, sessionId, apiKey, localPort, fetchImpl = fetch }) {
+  const url = `${origin}/api/preview-link/${sessionId}?local_port=${localPort}`;
+  const response = await fetchImpl(url, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) {
+    throw new Error(`preview-link port ${localPort} failed: HTTP ${response.status}`);
+  }
+  const body = await response.json();
+  const { capability, baseUrl } = capabilityFromResponse(body);
+  if (!capability) {
+    throw new Error(`preview-link port ${localPort} returned no capability; keys: ${Object.keys(body).join(", ")}`);
+  }
+  return { capability, baseUrl };
+}
+
+export async function fetchDescriptor({ descriptorBase, capability, fetchImpl = fetch }) {
+  const response = await fetchImpl(`${descriptorBase}/descriptor`, {
+    headers: { "x-anyrun-network-token": capability },
+  });
+  if (!response.ok) {
+    throw new Error(`descriptor fetch failed: HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
 const DESKTOP_PORT = Number(process.env.DEVBOX_BOT_PORT || 7811);
 const DESKTOP_URL = `http://127.0.0.1:${DESKTOP_PORT}`;
 
