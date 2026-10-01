@@ -6,6 +6,7 @@ import {
   builtAsar,
   builtAsarUnpacked,
   repoRoot,
+  runtimeResourcesDir,
   sourceAppDir,
   stagedAppDir
 } from "./config.mjs";
@@ -136,14 +137,22 @@ export async function buildAsar({
   stageRoot = stagedAppDir,
   archivePath = builtAsar,
   unpackedRoot = builtAsarUnpacked,
+  productName = undefined,
 } = {}) {
   const runtimeApp = await resolveRuntimeApp();
-  const resources = path.join(runtimeApp, "Contents", "Resources");
+  const resources = runtimeResourcesDir(runtimeApp);
   const runtimeUnpacked = path.join(resources, "app.asar.unpacked", "dist");
 
   await rm(buildRoot, { recursive: true, force: true });
   await mkdir(buildRoot, { recursive: true });
   await cp(sourceAppDir, stageRoot, { recursive: true, dereference: false, preserveTimestamps: true });
+
+  if (productName !== undefined) {
+    const stagedPackagePath = path.join(stageRoot, "package.json");
+    const stagedPackage = JSON.parse(await readFile(stagedPackagePath, "utf8"));
+    stagedPackage.productName = productName;
+    await writeFile(stagedPackagePath, `${JSON.stringify(stagedPackage, null, 2)}\n`);
+  }
 
   if (process.env.GROK_BOT_BUILD_DEV_APP === "1") {
     const stagedPackagePath = path.join(stageRoot, "package.json");

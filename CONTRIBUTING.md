@@ -22,3 +22,10 @@ Use focused commits. Explain whether a change affects reviewed runtime source,
 the editable frontend, the checksum-pinned packaged renderer, or packaging only.
 Do not weaken checksum, bundle identity, code-signing, or clean-export checks to
 make a build pass.
+
+## Windows x64 (DevBox)
+
+The win32-x64 target is opt-in (`GROK_BOT_TARGET=win32-x64`); the default
+target remains `darwin-arm64` and macOS behavior must stay byte-for-byte
+unchanged. The Windows runtime is verified only by the `windows-x64`
+GitHub workflow — see [docs/WINDOWS-X64-DEVBOX.md](docs/WINDOWS-X64-DEVBOX.md).

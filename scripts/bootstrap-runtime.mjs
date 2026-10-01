@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
-import { archivedDmg, cachedDmg, cachedRuntimeApp, dmgSha256, dmgUrl } from "./lib/config.mjs";
+import { archivedDmg, cachedDmg, cachedRuntimeApp, dmgSha256, dmgUrl, target, windowsInstaller } from "./lib/config.mjs";
 import { run } from "./lib/process.mjs";
 import { cacheRuntimeFromApp, hydrateSourcePayloadFromRuntime, validateRuntimeApp } from "./lib/runtime.mjs";
 import { SYSTEM_TOOLS } from "./lib/system-tools.mjs";
@@ -72,11 +72,59 @@ async function extractRuntime() {
   }
 }
 
+async function obtainInstaller() {
+  const { archived, cached, url, sha256: expected } = windowsInstaller;
+  await mkdir(path.dirname(cached), { recursive: true });
+  if (await exists(cached)) {
+    if ((await sha256(cached)) === expected) return cached;
+    await rm(cached, { force: true });
+  }
+  if (await exists(archived)) {
+    // An LFS pointer file fails the checksum and falls through to download.
+    if ((await sha256(archived)) === expected) {
+      console.log(`Using archived installer ${archived}`);
+      await copyFile(archived, cached);
+      return cached;
+    }
+  }
+  console.log(`Downloading ${url}`);
+  const response = await fetch(url, { redirect: "follow" });
+  if (!response.ok || response.body == null) {
+    throw new Error(`Download failed: HTTP ${response.status}`);
+  }
+  const partial = `${cached}.partial`;
+  await rm(partial, { force: true });
+  await pipeline(Readable.fromWeb(response.body), createWriteStream(partial, { mode: 0o600 }));
+  if ((await sha256(partial)) !== expected) {
+    await rm(partial, { force: true });
+    throw new Error("Windows installer checksum mismatch after download");
+  }
+  await rename(partial, cached);
+  return cached;
+}
+
+async function extractWindowsRuntime() {
+  const installer = await obtainInstaller();
+  const sevenZip = process.env.GROK_BOT_7Z?.trim() || "7z";
+  const temporary = await mkdtemp(path.join(tmpdir(), "grok-bot-018-win32-"));
+  try {
+    await run(sevenZip, ["x", "-y", `-o${temporary}`, installer, "$PLUGINSDIR/app-64.7z"]);
+    await mkdir(cachedRuntimeApp, { recursive: true });
+    await rm(cachedRuntimeApp, { recursive: true, force: true });
+    await run(sevenZip, ["x", "-y", `-o${cachedRuntimeApp}`, path.join(temporary, "$PLUGINSDIR", "app-64.7z")]);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+
 const configuredApp = process.env.GROK_BOT_018_APP?.trim();
 let runtimeApp;
 if (configuredApp) {
   runtimeApp = await cacheRuntimeFromApp(configuredApp);
 } else if (await exists(cachedRuntimeApp)) {
+  runtimeApp = await validateRuntimeApp(cachedRuntimeApp);
+} else if (target === "win32-x64") {
+  await extractWindowsRuntime();
   runtimeApp = await validateRuntimeApp(cachedRuntimeApp);
 } else {
   await downloadDmg();

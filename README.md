@@ -224,3 +224,12 @@ For changes, read [CONTRIBUTING.md](CONTRIBUTING.md). For the clean-history
 export procedure, see [docs/PUBLISHING.md](docs/PUBLISHING.md). Technical
 provenance and retained upstream boundaries are described in
 [PROVENANCE.md](PROVENANCE.md) and [NOTICE.md](NOTICE.md).
+
+## Windows x64 (DevBox)
+
+A win32-x64 build (`GROK_BOT_TARGET=win32-x64`) repackages the upstream
+Windows installer with the reconstructed ASAR and connects to a box host
+running as a DevBox plugin instead of Cursor's box service. The Windows
+runtime is verified only by the `windows-x64` GitHub workflow — see
+[docs/WINDOWS-X64-DEVBOX.md](docs/WINDOWS-X64-DEVBOX.md) for the design,
+`npm run bootstrap:win` / `npm run package:win` / `npm run devbox:connect`.

@@ -1,0 +1,61 @@
+name: windows-x64
+
+on:
+  push:
+    branches: [devin/1790861083-windows-x64-devbox]
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: "DevBox session id for a live gateway smoke (optional)"
+        required: false
+
+jobs:
+  build-and-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26.5.0"
+      - run: npm ci --no-audit --no-fund
+      - run: npm run bootstrap:win
+      - run: npm run package:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reconstructed-package
+          path: "dist/Grok Bot 0.18 Reconstructed-win32-x64/reconstructed-package.json"
+      - name: Launch smoke (CDP screenshot)
+        shell: pwsh
+        env:
+          DEVBOX_GATEWAY_URL: ${{ secrets.DEVBOX_GATEWAY_URL }}
+          DEVBOX_GATEWAY_TOKEN: ${{ secrets.DEVBOX_GATEWAY_TOKEN }}
+          DEVBOX_NETWORK_TOKEN: ${{ secrets.DEVBOX_NETWORK_TOKEN }}
+        run: |
+          $exe = "dist/Grok Bot 0.18 Reconstructed-win32-x64/Grok Bot.exe"
+          $env:SAND_HOST_GATEWAY_URL = $env:DEVBOX_GATEWAY_URL
+          $env:SAND_HOST_GATEWAY_TOKEN = $env:DEVBOX_GATEWAY_TOKEN
+          $env:SAND_HOST_GATEWAY_NETWORK_TOKEN = $env:DEVBOX_NETWORK_TOKEN
+          $proc = Start-Process -FilePath $exe -ArgumentList "--remote-debugging-port=9229" -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try {
+                Invoke-RestMethod http://127.0.0.1:9229/json/version | Out-Null
+                $ready = $true; break
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ready) { throw "Grok Bot.exe did not open a CDP endpoint" }
+            node scripts/ci/cdp-screenshot.mjs 9229 window.png window.json
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: window-screenshot
+          path: |
+            window.png
+            window.json
