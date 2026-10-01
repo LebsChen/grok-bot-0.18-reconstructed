@@ -127,4 +127,4 @@ GROKBOT_FORK_ROOT=/path/to/grok-bot \
 
 ---
 Vendored copy of DevBox `plugin/bot` (private repo).
-Sync source: DevBox branch `devin/1786279869-session-page-menus` at `f73b9b46` plus the pending identity-keyed box-state fix (re-vendor after its push).
+Sync source: DevBox branch `devin/1786279869-session-page-menus` at `44b26777`.
