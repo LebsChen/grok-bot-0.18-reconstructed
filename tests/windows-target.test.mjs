@@ -65,11 +65,19 @@ test("with-target.mjs sets GROK_BOT_TARGET for the child script", () => {
 });
 
 test("devbox-connect capability extraction", async () => {
-  const { capabilityFromUrl, mintPreviewLink } = await import("../scripts/devbox-connect.mjs");
+  const { capabilityFromUrl, capabilityFromResponse, mintPreviewLink } = await import("../scripts/devbox-connect.mjs");
   const parsed = capabilityFromUrl("https://s-abc-1340.relay.example/health?tkn=v1.token&x=1#f");
   assert.equal(parsed.capability, "v1.token");
   assert.equal(parsed.baseUrl, "https://s-abc-1340.relay.example/health");
   assert.equal(capabilityFromUrl("https://h/").capability, null);
+  // Real DevBox shape: token is a body field, the URL carries no tkn.
+  const real = capabilityFromResponse({
+    url: "https://s-abc-1341.relay.example/",
+    session_path: "/api/...",
+    token: "v1.bodycap",
+  });
+  assert.equal(real.capability, "v1.bodycap");
+  assert.equal(real.baseUrl, "https://s-abc-1341.relay.example");
 
   const calls = [];
   const fakeFetch = async (url, options) => {
@@ -77,7 +85,11 @@ test("devbox-connect capability extraction", async () => {
     return {
       ok: true,
       status: 200,
-      json: async () => ({ url: "https://s-abc-1341.relay.example/?tkn=v1.cap" }),
+      json: async () => ({
+        url: "https://s-abc-1341.relay.example/",
+        session_path: "/api/...",
+        token: "v1.cap",
+      }),
     };
   };
   const minted = await mintPreviewLink({
@@ -88,7 +100,7 @@ test("devbox-connect capability extraction", async () => {
     fetchImpl: fakeFetch,
   });
   assert.equal(minted.capability, "v1.cap");
-  assert.equal(minted.baseUrl, "https://s-abc-1341.relay.example/");
+  assert.equal(minted.baseUrl, "https://s-abc-1341.relay.example");
   assert.equal(calls[0].url, "https://app.example/api/preview-link/devin-1?local_port=1341");
   assert.equal(calls[0].options.method, "PUT");
   assert.equal(calls[0].options.headers.Authorization, "Bearer key");

@@ -185,6 +185,17 @@ existing macOS behaviour and checks are byte-for-byte unchanged).
 Extraction uses `7z` (`GROK_BOT_7Z` override; preinstalled on GitHub
 `windows-latest`). The ASAR build runs on any OS; launching requires Windows.
 
+Packaging mode: `package-windows.mjs` uses the plain `buildAsar` path —
+the Windows upstream payload (win32 `sourceAppDir`) plus runtime
+`deps`/`native` and the reconstructed electron-main with a `productName`
+override. The macOS fidelity gate is **not applicable**: the release
+fidelity audit pins the darwin-arm64 renderer, and the Windows renderer
+inventory differs (it is missing 5 SVGs from
+`frontend/manifests/renderer-runtime-assets.json`), so feeding the win32
+payload through `buildFidelityReconstructedAsar` fails the audit by
+design. `reconstructed-package.json` records this as `buildMode`
+`windows-payload-plus-reconstructed-electron-main`.
+
 ## 12. Failure recovery
 
 | Failure | Detection | Recovery |

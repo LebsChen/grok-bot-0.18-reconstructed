@@ -13,6 +13,13 @@ export function capabilityFromUrl(rawUrl) {
   return { capability: token, baseUrl: `${parsed.origin}${parsed.pathname}` };
 }
 
+export function capabilityFromResponse(body) {
+  if (body.token) {
+    return { capability: body.token, baseUrl: (body.url ?? "").split("?")[0].split("#")[0].replace(/\/$/, "") };
+  }
+  return capabilityFromUrl(body.url ?? "");
+}
+
 export async function mintPreviewLink({ origin, sessionId, apiKey, localPort, fetchImpl = fetch }) {
   const url = `${origin}/api/preview-link/${sessionId}?local_port=${localPort}`;
   const response = await fetchImpl(url, {
@@ -23,9 +30,9 @@ export async function mintPreviewLink({ origin, sessionId, apiKey, localPort, fe
     throw new Error(`preview-link port ${localPort} failed: HTTP ${response.status}`);
   }
   const body = await response.json();
-  const { capability, baseUrl } = capabilityFromUrl(body.url ?? "");
+  const { capability, baseUrl } = capabilityFromResponse(body);
   if (!capability) {
-    throw new Error(`preview-link port ${localPort} returned no tkn capability; keys: ${Object.keys(body).join(", ")}`);
+    throw new Error(`preview-link port ${localPort} returned no capability; keys: ${Object.keys(body).join(", ")}`);
   }
   return { capability, baseUrl };
 }
@@ -88,7 +95,7 @@ async function main() {
     return;
   }
   console.log(`Launching ${appExe} against the session gateway (env redacted)`);
-  const child = spawn(appExe, ["--remote-debugging-port=0"], {
+  const child = spawn(appExe, [], {
     detached: true,
     stdio: "inherit",
     env: { ...process.env, ...env },

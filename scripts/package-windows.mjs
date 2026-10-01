@@ -4,8 +4,7 @@
 import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { buildFidelityReconstructedAsar } from "./clean-build.mjs";
+import { buildAsar } from "./lib/build-asar.mjs";
 import { cachedRuntimeApp, reconstructedName, runtimeResourcesDir, target, upstreamAsarSha256, windowsInstaller, windowsOutputApp } from "./lib/config.mjs";
 import { validateRuntimeApp } from "./lib/runtime.mjs";
 
@@ -13,7 +12,6 @@ if (target !== "win32-x64") {
   throw new Error("package-windows.mjs requires GROK_BOT_TARGET=win32-x64 (use scripts/with-target.mjs)");
 }
 
-const scriptPath = fileURLToPath(import.meta.url);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 
 async function walkFiles(root, current = root) {
@@ -30,7 +28,9 @@ const runtimeApp = await validateRuntimeApp(cachedRuntimeApp);
 const exePath = path.join(runtimeApp, "Grok Bot.exe");
 const exeSha256 = sha256(await readFile(exePath));
 
-const { builtAsar, builtAsarUnpacked } = await buildFidelityReconstructedAsar({
+// Windows uses the plain buildAsar path: the fidelity gate pins the
+// darwin-arm64 renderer, so it cannot run against the win32 payload.
+const { builtAsar, builtAsarUnpacked } = await buildAsar({
   productName: reconstructedName,
 });
 
@@ -58,6 +58,8 @@ for (const relative of unpackedFiles) {
 const manifest = {
   schemaVersion: 1,
   target,
+  buildMode: "windows-payload-plus-reconstructed-electron-main",
+  fidelityGate: "not-applicable (macOS release fidelity audit pins the darwin-arm64 renderer)",
   productName: reconstructedName,
   upstreamInstallerSha256: windowsInstaller.sha256,
   upstreamAppAsarSha256: upstreamAsarSha256,
@@ -73,7 +75,3 @@ await writeFile(path.join(windowsOutputApp, "reconstructed-package.json"), `${JS
 console.log(`Windows package ready: ${windowsOutputApp}`);
 console.log(`Built ASAR sha256: ${manifest.builtAsarSha256}`);
 console.log(`Exe unchanged from runtime: ${outputExeSha256}`);
-
-if (process.argv[1] != null && path.resolve(process.argv[1]) === scriptPath) {
-  // top-level: already ran
-}
