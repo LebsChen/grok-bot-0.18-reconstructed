@@ -40,13 +40,29 @@ jobs:
         env:
           DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
           PYTHONPATH: ${{ github.workspace }}/devbox-bot
+          DEVBOX_ORIGIN: http://127.0.0.1:7811
         run: |
           if (-not $env:DEVBOX_API_KEY) { Write-Host "DEVBOX_API_KEY secret absent; skipping"; exit 0 }
           python -m pip install -r devbox-bot/requirements.txt
           node_modules/.bin/esbuild scripts/ci/devbox-backend-smoke.mjs `
             --bundle --platform=node --format=esm --packages=external `
             --outfile=backend-smoke-bundle.mjs
-          node backend-smoke-bundle.mjs backend-smoke.json
+          $bot = Start-Process -FilePath python `
+            -ArgumentList "-m","devbox_bot.desktop","--port","7811" `
+            -PassThru -NoNewWindow `
+            -RedirectStandardOutput backend-bot.log `
+            -RedirectStandardError backend-bot-err.log
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try { Invoke-RestMethod http://127.0.0.1:7811/healthz | Out-Null; $ok = $true; break }
+              catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ok) { throw "devbox_bot.desktop did not come up on :7811" }
+            node backend-smoke-bundle.mjs backend-smoke.json
+          } finally {
+            Stop-Process -Id $bot.Id -Force -ErrorAction SilentlyContinue
+          }
       - name: Launch smoke (devbox_bot.desktop + CDP sign-in)
         shell: pwsh
         env:
