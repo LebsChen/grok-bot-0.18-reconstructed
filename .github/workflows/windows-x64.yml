@@ -27,17 +27,18 @@ jobs:
         with:
           name: reconstructed-package
           path: "dist/Grok Bot 0.18 Reconstructed-win32-x64/reconstructed-package.json"
+      - name: DevBox gateway smoke
+        if: github.event_name == 'workflow_dispatch' && inputs.session_id != ''
+        env:
+          DEVBOX_SESSION_ID: ${{ inputs.session_id }}
+          DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
+        run: node scripts/ci/devbox-gateway-smoke.mjs gateway-smoke.json
       - name: Launch smoke (CDP screenshot)
         shell: pwsh
-        env:
-          DEVBOX_GATEWAY_URL: ${{ secrets.DEVBOX_GATEWAY_URL }}
-          DEVBOX_GATEWAY_TOKEN: ${{ secrets.DEVBOX_GATEWAY_TOKEN }}
-          DEVBOX_NETWORK_TOKEN: ${{ secrets.DEVBOX_NETWORK_TOKEN }}
         run: |
           $exe = "dist/Grok Bot 0.18 Reconstructed-win32-x64/Grok Bot.exe"
-          $env:SAND_HOST_GATEWAY_URL = $env:DEVBOX_GATEWAY_URL
-          $env:SAND_HOST_GATEWAY_TOKEN = $env:DEVBOX_GATEWAY_TOKEN
-          $env:SAND_HOST_GATEWAY_NETWORK_TOKEN = $env:DEVBOX_NETWORK_TOKEN
+          # SAND_HOST_GATEWAY_* comes from GITHUB_ENV when the gateway
+          # smoke step ran; otherwise unset (local/offline launch).
           $proc = Start-Process -FilePath $exe -ArgumentList "--remote-debugging-port=9229" -PassThru
           try {
             $ready = $false
@@ -49,6 +50,10 @@ jobs:
             }
             if (-not $ready) { throw "Grok Bot.exe did not open a CDP endpoint" }
             node scripts/ci/cdp-screenshot.mjs 9229 window.png window.json
+            if ($env:SAND_HOST_GATEWAY_URL) {
+              Start-Sleep -Seconds 20
+              node scripts/ci/cdp-screenshot.mjs 9229 window-connected.png window-connected.json
+            }
           } finally {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           }
@@ -59,3 +64,6 @@ jobs:
           path: |
             window.png
             window.json
+            window-connected.png
+            window-connected.json
+            gateway-smoke.json

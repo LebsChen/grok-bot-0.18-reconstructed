@@ -133,6 +133,77 @@ test("archive entry listing normalizes win32-style separator entries", async () 
   assert.ok(statCalls.every(p => p === p.split("/").join(path.sep)));
 });
 
+test("gateway smoke redacts tokens and evaluates 401/200 matrix", async () => {
+  const { runSmoke } = await import("../scripts/ci/devbox-gateway-smoke.mjs");
+  const SECRETS = ["v1.cap1340", "v1.cap1341", "gw-secret-token"];
+  const fakeFetch = async (url, options = {}) => {
+    const headers = options.headers ?? {};
+    const json = (status, body, contentType = "application/json") => ({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: new Map([["content-type", contentType]]),
+      json: async () => body,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    });
+    if (url.includes("/api/preview-link/")) {
+      const port = url.includes("1341") ? 1341 : 1340;
+      return json(200, {
+        url: `https://s-1-${port}.relay.example/`,
+        session_path: "/api/x",
+        token: `v1.cap${port}`,
+      });
+    }
+    if (url.endsWith("/descriptor")) {
+      return headers["x-anyrun-network-token"] === "v1.cap1341"
+        ? json(200, { schema: 1, gatewayPort: 1340, gatewayToken: "gw-secret-token", hostVersion: "0.18.0" })
+        : json(401, { error: "unauthorized" });
+    }
+    if (url.endsWith("/health")) {
+      return headers["x-anyrun-network-token"] === "v1.cap1340"
+        ? json(200, { ok: true }) : json(401, {});
+    }
+    if (url.endsWith("/api/listAgents")) {
+      if (headers["x-anyrun-network-token"] !== "v1.cap1340") return json(401, {});
+      return headers.Authorization === "Bearer gw-secret-token"
+        ? json(200, { agents: [{}, {}] }) : json(401, {});
+    }
+    if (url.endsWith("/events")) {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("retry: 1000\n\ndata: {\"x\":1}\n\n"));
+        },
+      });
+      return {
+        ok: true, status: 200,
+        headers: new Map([["content-type", "text/event-stream"]]),
+        body: stream,
+        json: async () => ({}),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    }
+    return json(404, { error: "nope" });
+  };
+  const { result, secretsToMask } = await runSmoke({
+    sessionId: "devin-1", apiKey: "k", fetchImpl: fakeFetch,
+    envFilePath: null,
+  });
+  assert.equal(result.ok, true, JSON.stringify(result.steps));
+  const serialized = JSON.stringify(result);
+  for (const secret of SECRETS) {
+    assert.ok(!serialized.includes(secret), `secret leaked: ${secret}`);
+  }
+  assert.ok(secretsToMask.includes("gw-secret-token"));
+  const byName = Object.fromEntries(result.steps.map(s => [s.name, s]));
+  assert.equal(byName["listAgents-no-bearer-401"].status, "pass");
+  assert.equal(byName["listAgents-with-bearer-200"].status, "pass");
+  assert.equal(byName["listAgents-with-bearer-200"].agentCount, 2);
+  assert.equal(byName["listAgents-bogus-capability-401"].status, "pass");
+  assert.equal(byName["events-sse"].firstDataLine, '{"x":1}');
+  assert.equal(byName.descriptor.gatewayPort, 1340);
+  // gatewayToken must not appear in the recorded descriptor keys.
+  assert.ok(!byName.descriptor.keys.includes("gatewayToken"));
+});
+
 test("integrity check still reports missing-archive-entry on real drift", async () => {
   const { verifyStagedPackageIntegrity } = await import("../scripts/lib/asar-integrity.mjs");
   const stageRoot = mkdtempSync(path.join(tmpdir(), "grok-bot-stage-"));
