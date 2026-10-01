@@ -5,6 +5,8 @@
 // output JSON or stdout.
 import { appendFile, writeFile } from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { fetchDescriptor, mintPreviewLink } from "../devbox-connect.mjs";
 
 const SENSITIVE = new Set(["gatewayToken", "token"]);
@@ -188,7 +190,7 @@ async function main() {
 }
 
 if (process.argv[1] != null
-    && new URL(import.meta.url).pathname === new URL(`file://${process.argv[1]}`).pathname) {
+    && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch(error => {
     console.error(error?.message ?? error);
     process.exit(1);
