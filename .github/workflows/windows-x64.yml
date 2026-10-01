@@ -39,11 +39,14 @@ jobs:
       - name: DevBox backend smoke (plugin/bot)
         env:
           DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
+          GROKBOT_LLM_BASE_URL: ${{ secrets.GROKBOT_LLM_BASE_URL }}
+          GROKBOT_LLM_API_KEY: ${{ secrets.GROKBOT_LLM_API_KEY }}
+          GROKBOT_LLM_MODEL: ${{ secrets.GROKBOT_LLM_MODEL }}
           PYTHONPATH: ${{ github.workspace }}/devbox-bot
           DEVBOX_ORIGIN: http://127.0.0.1:7811
           GROKBOT_BOX_DEADLINE_S: "600"
         run: |
-          if (-not $env:DEVBOX_API_KEY) { Write-Host "DEVBOX_API_KEY secret absent; skipping"; exit 0 }
+          if (-not $env:DEVBOX_API_KEY) { throw "DEVBOX_API_KEY secret is required" }
           python -m pip install -r devbox-bot/requirements.txt
           node_modules/.bin/esbuild scripts/ci/devbox-backend-smoke.mjs `
             --bundle --platform=node --format=esm --packages=external `

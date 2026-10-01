@@ -14,9 +14,8 @@
 #   GROKBOT_LLM_BASE_URL/_API_KEY/_MODEL   org secrets → inference
 set -euo pipefail
 
-# DevBox session secrets only reach *one-shot* exec environments, not
-# interactive shells — so the staging step asks the agent to dump them to
-# creds.env (0600) first; source it here if present.
+# The provisioning listener writes the allow-listed credentials to this
+# mode-0600 file before launching the startup script.
 if [ -f "$HOME/.grok-bot-box/creds.env" ]; then
   set -a; . "$HOME/.grok-bot-box/creds.env"; set +a
 fi
@@ -68,6 +67,7 @@ if [ -n "$TOKEN" ]; then
 fi
 
 if [ ! -f "$MARKER" ]; then
+  echo "start-box: phase=download"
   if [ -z "$RUNTIME_URL" ]; then
     echo "start-box: no runtime URL (GROKBOT_RUNTIME_URL unset and" \
          "no plugin-assets origin)" >&2
@@ -103,6 +103,7 @@ if [ ! -f "$MARKER" ]; then
   curl -fL --connect-timeout 15 --max-time 60 --retry 3 \
     "${AUTH[@]}" -o "$PACK.sha256" "$RUNTIME_URL.sha256"
   (cd "$GB_HOME" && sha256sum -c "$PACK_NAME.sha256")
+  echo "start-box: phase=extract"
   tar -xzf "$PACK" -C "$PACK_DIR"
   rm -f "$PACK" "$PACK.sha256"
   touch "$MARKER"
@@ -128,6 +129,7 @@ if [ ! -d "$BOT_DIR" ]; then
 fi
 
 # ── devbox_bot.box (inference endpoint) ─────────────────────────────
+echo "start-box: phase=box"
 if ! curl -fsS -o /dev/null "http://127.0.0.1:7812/healthz" \
     2>/dev/null; then
   (  # secrets exported, never on the env argv (visible via /proc)
@@ -142,6 +144,8 @@ if ! curl -fsS -o /dev/null "http://127.0.0.1:7812/healthz" \
     exec setsid "$PY" -m devbox_bot.box --port 7812 \
       >>"$LOG_DIR/box.log" 2>&1 < /dev/null
   ) &
+  printf '%s\n' "$!" > "$GB_HOME/box.pid"
+  chmod 600 "$GB_HOME/box.pid"
   echo "start-box: devbox_bot.box pid $!"
 fi
 
@@ -164,6 +168,7 @@ fi
 
 if ! curl -fsS -o /dev/null "http://127.0.0.1:1340/health" \
     2>/dev/null; then
+  echo "start-box: phase=host-main"
   (  # secrets exported, never on the env argv (visible via /proc)
     export SAND_PACKAGED=1 SAND_HOST_IN_BOX=1 SAND_BOX_AUTO_UPDATE=0
     export SAND_DATA_ROOT="$SAND_DATA_ROOT"
@@ -179,6 +184,8 @@ if ! curl -fsS -o /dev/null "http://127.0.0.1:1340/health" \
     exec setsid node "$HOST_MAIN" \
       >>"$LOG_DIR/host-main.log" 2>&1 < /dev/null
   ) &
+  printf '%s\n' "$!" > "$GB_HOME/host-main.pid"
+  chmod 600 "$GB_HOME/host-main.pid"
   echo "start-box: host-main pid $!"
 fi
 

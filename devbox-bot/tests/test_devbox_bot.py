@@ -8,8 +8,12 @@ import hashlib
 import http.server
 import io
 import json
+import os
+import socket
+import subprocess
 import sys
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -25,7 +29,7 @@ from devbox_bot.connect import (
     reset_unhandled,
     unhandled_methods,
 )
-from devbox_bot.desktop import DesktopBackend, _pkce_ok
+from devbox_bot.desktop import BOX_PROMPT, DesktopBackend, _pkce_ok
 from devbox_bot.inference import stream_inference
 
 
@@ -52,8 +56,6 @@ def _req(port, method, path, body=b"", headers=None):
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read(), dict(exc.headers)
 
-
-import urllib.error
 
 # ── PKCE / login ────────────────────────────────────────────────────
 
@@ -254,6 +256,8 @@ class _FakeDevBoxApi:
         self.sessions = sessions or {}
         self.created = []
         self.deleted = []
+        self.messages = []
+        self.calls = []
         self.ready_after = ready_after
         self._ensure_calls = 0
 
@@ -272,10 +276,15 @@ class _FakeDevBoxApi:
     def delete_session(self, org_id, sid):
         self.deleted.append(sid)
 
+    def send_message(self, org_id, sid, message):
+        self.messages.append((org_id, sid, message))
+        return {}
+
     def list_secrets(self, org_id):
         return []
 
     def call(self, method, path, **kw):
+        self.calls.append((method, path))
         if path.startswith("/api/preview-link/"):
             self._ensure_calls += 1
             if self._ensure_calls < self.ready_after:
@@ -287,6 +296,9 @@ class _FakeDevBoxApi:
 
 class _FakeHTTPResp:
     status = 200
+
+    def read(self):
+        return b'{"state":"awaiting"}'
 
     def __enter__(self):
         return self
@@ -302,6 +314,10 @@ def _patch_gateway(monkeypatch, backend, api):
                                      "org_id": "org-devbox"})
     monkeypatch.setattr(urllib.request, "urlopen",
                         lambda *a, **k: _FakeHTTPResp())
+    monkeypatch.setattr(backend, "_provision_relay",
+                        lambda *a, **k: (0, {}))
+    monkeypatch.setattr(
+        "devbox_bot.desktop.PROVISION_WAIT_S", 0.01)
     return api
 
 
@@ -358,6 +374,20 @@ def test_ensure_sandbox_unavailable(tmp_path, monkeypatch):
     with pytest.raises(ConnectError) as ei:
         backend._ensure_box({"authorization": "Bearer x"})
     assert ei.value.code == "unavailable"
+
+
+def test_provision_relay_mints_port_7813(tmp_path, monkeypatch):
+    backend = DesktopBackend(port=0, api_key="k",
+                             state_path=tmp_path / "s.json")
+    api = _FakeDevBoxApi()
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: _FakeHTTPResp())
+
+    status, body = backend._provision_relay(api, "devin-test", "/health")
+
+    assert status == 200
+    assert body == {"state": "awaiting"}
+    assert "local_port=7813" in api.calls[0][1]
 
 
 def test_recreate_deletes_and_reallocates(tmp_path, monkeypatch):
@@ -454,3 +484,234 @@ def test_box_dashboard_requires_bearer(monkeypatch):
         assert status == 401
     finally:
         server.shutdown()
+
+
+def _free_port():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _start_provision_listener(tmp_path, *, idle="900"):
+    port = _free_port()
+    home = tmp_path / "grok-bot-box"
+    env = dict(os.environ)
+    env.update({
+        "GROKBOT_HOME": str(home),
+        "GROKBOT_PROVISION_PORT": str(port),
+        "GROKBOT_PROVISION_IDLE_S": idle,
+    })
+    script = (Path(__file__).resolve().parent.parent
+              / "box" / "provision.py")
+    proc = subprocess.Popen(
+        [sys.executable, str(script)], env=env,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return proc, port, home
+
+
+def _get_json(port, path):
+    with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}{path}", timeout=5) as response:
+        return response.status, json.loads(response.read())
+
+
+def _post_json(port, path, body):
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(body).encode(),
+        headers={"content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+def _wait_listener(port, proc, timeout=10):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and proc.poll() is None:
+        try:
+            status, body = _get_json(port, "/health")
+            if status == 200:
+                return body
+        except OSError:
+            time.sleep(0.1)
+    raise AssertionError("provision listener did not become ready")
+
+
+def test_provision_listener_flow_and_second_post_409(tmp_path):
+    proc, port, home = _start_provision_listener(tmp_path)
+    try:
+        assert _wait_listener(port, proc)["state"] == "awaiting"
+        unknown_status, unknown_body = _post_json(
+            port, "/provision",
+            {"GROKBOT_GATEWAY_TOKEN": "test-secret", "BAD_KEY": "x"})
+        assert unknown_status == 400
+        assert unknown_body["keys"] == ["BAD_KEY"]
+        non_string_status, _ = _post_json(
+            port, "/provision", {"GROKBOT_GATEWAY_TOKEN": 5})
+        assert non_string_status == 400
+
+        if os.name == "posix":
+            log_dir = home / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            (log_dir / "start-box.log").write_text(
+                "GROKBOT_GATEWAY_TOKEN=test-secret test-secret\n")
+        status, body = _post_json(
+            port, "/provision", {"GROKBOT_GATEWAY_TOKEN": "test-secret"})
+        assert status == 202
+        assert body["state"] == "provisioning"
+        assert proc.poll() is None
+        creds = home / "creds.env"
+        assert creds.exists()
+        if os.name == "posix":
+            assert creds.stat().st_mode & 0o777 == 0o600
+
+        status, details = _get_json(port, "/status")
+        assert status == 200
+        assert details["state"] == "provisioning"
+        assert details["phase"] in {
+            "download", "extract", "box", "host-main"}
+        assert {"listener", "start_box", "box", "host_main"} <= set(
+            details["pids"])
+        assert "test-secret" not in json.dumps(details)
+
+        second_status, _ = _post_json(
+            port, "/provision", {"GROKBOT_GATEWAY_TOKEN": "test-secret"})
+        assert proc.poll() is None
+        assert second_status == 409
+
+        duplicate = subprocess.run(
+            [sys.executable,
+             str(Path(__file__).resolve().parent.parent
+                 / "box" / "provision.py")],
+            env=dict(os.environ, GROKBOT_HOME=str(home),
+                     GROKBOT_PROVISION_PORT=str(port)),
+            timeout=5, check=False)
+        assert duplicate.returncode == 0
+        assert proc.poll() is None
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=10)
+
+
+def test_provision_listener_idle_exit(tmp_path):
+    proc, port, _ = _start_provision_listener(tmp_path, idle="1")
+    try:
+        _wait_listener(port, proc)
+        assert proc.wait(timeout=5) == 0
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=10)
+
+
+def test_provision_listener_restart_resumes_services(tmp_path):
+    home = tmp_path / "grok-bot-box"
+    home.mkdir()
+    (home / "creds.env").write_text(
+        "GROKBOT_GATEWAY_TOKEN='test-token'\n")
+    (home / "start-box.sh").write_text(
+        'printf resumed > "$GROKBOT_HOME/resume.log"\n')
+    proc, port, _ = _start_provision_listener(tmp_path)
+    try:
+        assert _wait_listener(port, proc)["state"] == "provisioning"
+        deadline = time.monotonic() + 5
+        while (time.monotonic() < deadline
+               and not (home / "resume.log").exists()):
+            time.sleep(0.05)
+        assert (home / "resume.log").read_text() == "resumed"
+        assert proc.poll() is None
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=10)
+
+
+def test_ensure_sandbox_uses_provision_listener(tmp_path, monkeypatch):
+    backend = DesktopBackend(port=0, api_key="k",
+                             state_path=tmp_path / "s.json")
+    api = _patch_gateway(monkeypatch, backend, _FakeDevBoxApi())
+    relayed = []
+
+    def provision_relay(_api, _sid, path, payload=None):
+        relayed.append((path, payload))
+        if path == "/health":
+            return 200, {"state": "awaiting"}
+        return 202, {"state": "provisioning"}
+
+    monkeypatch.setattr(backend, "_provision_relay", provision_relay)
+    response = backend._ensure_box({"authorization": "Bearer x"})
+    assert [path for path, _ in relayed] == ["/health", "/provision"]
+    payload = relayed[-1][1]
+    assert payload["GROKBOT_GATEWAY_TOKEN"]
+    assert payload["GROKBOT_INFERENCE_CREDENTIAL"]
+    assert response["provision_path"] == "provision"
+    assert backend._box_state({
+        "user_id": "u", "org_id": "org-devbox"
+    })["provision_path"] == "provision"
+    kwargs = api.created[0][2]
+    assert kwargs["image_family"] == "Debian_12"
+    assert BOX_PROMPT == (
+        "This session hosts the Grok Bot box runtime. Do not run commands "
+        "or stage/start services unless a follow-up message explicitly asks "
+        "you to do so.")
+
+
+def test_ensure_sandbox_agent_fallback_waits_for_timeout(
+        tmp_path, monkeypatch):
+    backend = DesktopBackend(port=0, api_key="k",
+                             state_path=tmp_path / "s.json")
+    api = _patch_gateway(monkeypatch, backend, _FakeDevBoxApi())
+    elapsed = [0.0]
+    monkeypatch.setattr(
+        "devbox_bot.desktop.PROVISION_WAIT_S", 0.02)
+    monkeypatch.setattr(
+        "devbox_bot.desktop.time.monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(
+        "devbox_bot.desktop.time.sleep",
+        lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds))
+    response = backend._ensure_box({"authorization": "Bearer x"})
+    assert elapsed[0] >= 0.02
+    assert response["provision_path"] == "agent"
+    assert len(api.messages) == 1
+    assert "120 seconds" in api.messages[0][2]
+    state = backend._box_state({
+        "user_id": "u", "org_id": "org-devbox"
+    })
+    assert state["provision_path"] == "agent"
+
+
+def test_ensure_sandbox_reprovisions_when_listener_awaiting(
+        tmp_path, monkeypatch):
+    backend = DesktopBackend(port=0, api_key="k",
+                             state_path=tmp_path / "s.json")
+    api = _FakeDevBoxApi(sessions={"devin-old": {"status": "running"}})
+    _patch_gateway(monkeypatch, backend, api)
+    backend._save_box_state({"user_id": "u", "org_id": "org-devbox"}, {
+        "session_id": "devin-old", "gateway_token": "gt",
+        "inference_credential": "ic",
+    })
+    calls = []
+    gateway_calls = []
+
+    def provision_relay(_api, _sid, path, payload=None):
+        calls.append((path, payload))
+        if path == "/health":
+            return 200, {"state": "awaiting"}
+        return 202, {"state": "provisioning"}
+
+    def gateway_coords(_api, sid, box):
+        gateway_calls.append(sid)
+        if len(gateway_calls) == 1:
+            return None
+        return {"pod_id": sid, "provision_path": box.get("provision_path")}
+
+    monkeypatch.setattr(backend, "_provision_relay", provision_relay)
+    monkeypatch.setattr(backend, "_gateway_coords", gateway_coords)
+    response = backend._ensure_box({"authorization": "Bearer x"})
+    assert [path for path, _ in calls] == ["/health", "/provision"]
+    assert response["pod_id"] == "devin-old"
+    assert response["provision_path"] == "provision"
+    assert not api.created

@@ -21,8 +21,8 @@ Customize plugin: the bridge is the standalone `devbox_bot` package
  Windows x64 PC                          DevBox (unchanged)                DevBox guest VM (Debian 12)
 ┌──────────────────────────┐           ┌─────────────────────┐           ┌──────────────────────────────┐
 │ devbox-connect.mjs       │           │ OIDC authorize +    │           │ blueprint dep startup:        │
-│  starts devbox_bot.      │  local    │ oauth/token         │           │  stage box/start-box.sh       │
-│  desktop :7811           │  loopback │ v3 sessions API     │           │ agent prompt → run script     │
+│  starts devbox_bot.      │  local    │ oauth/token         │           │ stage provision.py + script  │
+│  desktop :7811           │  loopback │ v3 sessions API     │           │ listener :7813, relay creds   │
 │ Grok Bot.exe             │           │ preview-link caps   │           │  ├─ devbox_bot.box :7812      │
 │  SAND_BACKEND_URL ───────┼──────────▶│ org secrets +       │  secrets  │  │  (inference → org LLM)      │
 │  CURSOR_API_BASE_URL ────┤  Connect  │ blueprints          │  env      │  └─ host-main :1340 (0.0.0.0) │
@@ -36,12 +36,17 @@ Customize plugin: the bridge is the standalone `devbox_bot` package
   client's `{accessToken, refreshToken, authId}` shape. Headless CI mode
   (`DEVBOX_API_KEY`) mints a local JWT instead.
 * **Box** — `GrokBotService.EnsureSandBox` find-or-creates a DevBox session
-  tagged `grok-bot-box`; a blueprint `dep` startup command stages
-  `box/start-box.sh` and the session prompt runs it once (secrets env only
-  reaches exec tool calls, so the agent dumps it to `creds.env` first).
-  The script fetches the runtime pack (GitHub release, parallel byte-range
+  tagged `grok-bot-box`; the blueprint stages `box/provision.py` and
+  `box/start-box.sh`, then starts the stdlib provisioning listener on
+  `0.0.0.0:7813`. The desktop relays allow-listed credentials to that
+  listener, which writes mode-0600 `creds.env` and launches the startup
+  script. It fetches the runtime pack (GitHub release, parallel byte-range
   download + sha256 verify), starts `devbox_bot.box` (:7812) and host-main
-  (:1340, `SAND_GATEWAY_BIND_HOST=0.0.0.0`, token auth).
+  (:1340, `SAND_GATEWAY_BIND_HOST=0.0.0.0`, token auth). `GET /status` on
+  the listener exposes startup phase, process pids, and redacted log tail.
+  Agent staging is fallback only after 120 seconds of listener
+  unreachability; a healthy reused listener in `awaiting` is provisioned
+  again. Desktop state records `provision_path`.
 * **Inference** — `InferenceService.Stream` is served both by desktop.py
   (direct client calls) and by box.py inside the VM (host-main renewal
   credential → access token → Stream → org-secret LLM provider).
@@ -66,14 +71,21 @@ debug-only fallback that bypasses the local backend.
 
 `.github/workflows/windows-x64.yml` — build + package + CDP screenshot as
 before; optional `workflow_dispatch` runs `devbox-backend-smoke.mjs` and
-`devbox-gateway-smoke.mjs` with the `DEVBOX_API_KEY` Actions secret. The
-vendored `devbox-bot/` copy is synced from DevBox `plugin/bot/` (sync
-source commit noted in `devbox-bot/README.md`).
+`devbox-gateway-smoke.mjs`. The backend smoke step requires the
+`DEVBOX_API_KEY` secret and receives `GROKBOT_LLM_BASE_URL`,
+`GROKBOT_LLM_API_KEY`, and `GROKBOT_LLM_MODEL`; only the direct Stream check
+may skip, and only when `GROKBOT_LLM_API_KEY` is absent. The vendored
+`devbox-bot/` copy is synced from DevBox `plugin/bot/` (sync source commit
+noted in `devbox-bot/README.md`).
 
 ## 5. Known limits
 
-- Each box start costs one agent turn (startup commands only run at
-  session bootstrap; secrets env only exists in exec tool calls).
+- Deterministic listener provisioning is implemented but remains pending
+  live-box verification. The previous 938-second gateway stall is
+  undiagnosed; capture guest `/status` during a repro before attributing it.
+- Agent staging remains a fallback for listener unreachability; ordinary
+  sessions start only the listener and should exit after its idle timeout
+  without downloading the runtime.
 - Guest egress to GitHub is slow — the parallel download mitigates it.
 - Cloudflare blocks `Python-urllib/*` user agents on the relay; probes
   must set a custom UA.

@@ -1,5 +1,7 @@
 # devbox_bot — Grok Bot ↔ DevBox bridge (plugin/bot)
 
+> Vendored from DevBox `plugin/bot/` at source commit `8f964f79` (2026-10-01).
+
 A standalone backend that lets the Grok Bot desktop (Cursor fork) run
 entirely against a DevBox deployment — sign-in, account, box allocation
 and inference — **with zero DevBox code changes** and *not* as a
@@ -22,10 +24,12 @@ devbox_bot.desktop  ── Connect RPCs (aiserver.v1/agent.v1) ──┐
    │  /sand-box/* (desktop-side inference only)              │ APIs
    ▼                                                        ▼
 DevBox v3 session "grok-bot-box" (Debian_12 box)
-   ├─ blueprint startup → box/start-box.sh
+   ├─ blueprint startup → provision.py listener (:7813)
+   │    └─ relay credentials → mode-0600 creds.env → start-box.sh
    │    ├─ devbox_bot.box  on 127.0.0.1:7812  (inference endpoint)
    │    └─ host-main       on 0.0.0.0:1340    (SAND_* env)
-   └─ preview-link capability → relay gateway → desktop
+   ├─ preview-link :7813 → provisioning listener
+   └─ preview-link :1340 → relay gateway → desktop
 ```
 
 `devbox_bot.desktop` is the "core domain" the packaged app is pointed
@@ -33,8 +37,14 @@ at. It implements the client's Connect services
 (`DashboardService`/`AiService`/`GrokBotService`/`InferenceService`/
 `AnalyticsService`/`AgentService` catch-all) over the DevBox APIs above.
 
-`devbox_bot.box` runs inside the box VM (started by the blueprint
-startup command) and serves `/sand-box/inference-credential` +
+`provision.py` is a stdlib-only listener started by the org blueprint.
+It accepts allow-listed credentials over guest port 7813, writes
+`creds.env` with mode 0600, and starts `start-box.sh` without an agent
+turn. `GET /health` reports `awaiting`, `provisioning`, or `provisioned`;
+`GET /status` reports the current startup phase, process pids, disk and
+`/home/box` details, and a redacted tail of the startup logs.
+
+`devbox_bot.box` runs inside the box VM and serves `/sand-box/inference-credential` +
 `InferenceService.Stream` so the in-box host-main's model calls end at
 your OpenAI-compatible endpoint instead of Cursor.
 
@@ -75,23 +85,29 @@ Box (in the VM, set by session/org secrets):
 
 ## DevBox setup
 
-`plugin/bot/tools/configure_devbox.py` creates, idempotently:
+`plugin/bot/tools/configure_devbox.py` creates or updates:
 
 1. org secrets `GROKBOT_LLM_BASE_URL` / `GROKBOT_LLM_API_KEY` /
    `GROKBOT_LLM_MODEL`
-2. a repo-target blueprint for `LebsChen/grok-bot-0.18-reconstructed`
-   whose startup command is `box/start-box.sh`
+2. an org-target blueprint that stages `start-box.sh` and `provision.py`
+   and starts the listener on `0.0.0.0:7813` (`--provision-idle-s`
+   defaults to 900 seconds)
+
+Set `DEVBOX_API_KEY` and the three `GROKBOT_LLM_*` variables in the process
+environment, then run:
 
 ```bash
-python plugin/bot/tools/configure_devbox.py \
-    --org <org> --api-key <admin key> \
-    --llm-base-url ... --llm-api-key ... --llm-model ...
+python plugin/bot/tools/configure_devbox.py --org <org>
+```
 ```
 
-`EnsureSandBox` then creates a v3 session with `repos=[<repo>]`,
-`session_secrets={GROKBOT_GATEWAY_TOKEN, GROKBOT_INFERENCE_CREDENTIAL,
-GROKBOT_RUNTIME_URL}` and `secret_ids=<the three org secrets>`, and the
-blueprint startup command runs `start-box.sh` inside the fresh VM.
+`EnsureSandBox` creates a v3 session with the credentials in both
+`session_secrets` and a POST to the listener through a preview-link
+capability for port 7813. It then waits for the gateway on port 1340.
+If the listener is unreachable continuously for 120 seconds only, the
+desktop sends an agent-staging follow-up and records `provision_path:
+"agent"`; otherwise it records `provision_path: "provision"`. Reuse
+re-provisions if the listener reports `awaiting`.
 
 ## Security
 
@@ -106,7 +122,11 @@ blueprint startup command runs `start-box.sh` inside the fresh VM.
 
 ## Limits
 
-- Each box start costs one agent turn (the v3 session prompt).
+- Ordinary sessions start only the short-lived listener; absent a
+  provisioning POST it exits after the configured idle timeout without
+  downloading the runtime.
+- `BOX_PROMPT` does not start services. Agent staging is only the
+  120-second listener-unreachable fallback.
 - Startup commands run only at session bootstrap — recreating a box
   deletes the session and reallocates.
 - The OIDC interactive flow requires a DevBox web session in the
@@ -124,7 +144,3 @@ runtime types:
 GROKBOT_FORK_ROOT=/path/to/grok-bot \
     node plugin/bot/tools/gen_descriptors.mjs
 ```
-
----
-Vendored copy of DevBox `plugin/bot` (private repo).
-Sync source: DevBox branch `devin/1786279869-session-page-menus` at `44b26777`.

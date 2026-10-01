@@ -34,6 +34,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -48,19 +49,22 @@ log = logging.getLogger("devbox_bot.desktop")
 
 BOX_TAG = "grok-bot-box"
 BOX_PROMPT = (
-    "This session hosts the Grok Bot box runtime. Secrets are injected "
-    "into your exec environment. Run exactly one one-shot exec WITHOUT "
-    "shell_id (do not use a persistent or interactive shell): "
-    "env | grep -E '^(GROKBOT_|DEVBOX_HARNESS_LLM_)' > "
-    "\"$HOME/.grok-bot-box/creds.env\" && chmod 600 "
-    "\"$HOME/.grok-bot-box/creds.env\" && bash "
-    "\"$HOME/.grok-bot-box/start-box.sh\" — the script is idempotent, "
-    "starts background services, and exits. Then reply with the single "
-    "word 'ready' and do nothing else.")
+    "This session hosts the Grok Bot box runtime. Do not run commands or "
+    "stage/start services unless a follow-up message explicitly asks you "
+    "to do so.")
+BOX_STAGE_PROMPT = (
+    "The automatic provisioning listener was unreachable for 120 seconds. "
+    "Run exactly one one-shot exec without shell_id: install -d -m 700 "
+    "\"$HOME/.grok-bot-box\"; umask 077; env | grep -E "
+    "'^(GROKBOT_|DEVBOX_HARNESS_LLM_)' > "
+    "\"$HOME/.grok-bot-box/creds.env\"; chmod 600 "
+    "\"$HOME/.grok-bot-box/creds.env\"; bash "
+    "\"$HOME/.grok-bot-box/start-box.sh\". Reply 'ready' after it exits.")
 OIDC_CLIENT_ID = "grok-bot-desktop"
 OIDC_SCOPE = "openid profile email offline_access"
 PENDING_TTL = 600
 BOX_DEADLINE_S = int(os.environ.get("GROKBOT_BOX_DEADLINE_S", "300"))
+PROVISION_WAIT_S = int(os.environ.get("GROKBOT_PROVISION_WAIT_S", "120"))
 STATE_DIR_NAME = "devbox-bot"
 PROD_CLIENT_ID = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB"
 DEV_CLIENT_ID = "OzaBXLClY5CAGxNzUhQ2vlknpi07tGuE"
@@ -365,6 +369,121 @@ class DesktopBackend:
         self.state.data["box"] = boxes
         self.state.save()
 
+    def _provision_payload(self, ident: dict, org_id: str,
+                           box: dict) -> dict[str, str]:
+        payload = {
+            "GROKBOT_GATEWAY_TOKEN": box["gateway_token"],
+            "GROKBOT_INFERENCE_CREDENTIAL": box["inference_credential"],
+            "GROKBOT_RUNTIME_URL": os.environ.get(
+                "GROKBOT_RUNTIME_URL", ""),
+            "GROKBOT_USER_JSON": json.dumps({
+                "user_id": ident.get("user_id") or "",
+                "org_id": org_id or "",
+                "name": ident.get("name") or "",
+            }),
+        }
+        for key, env_name in (
+                ("GROKBOT_LLM_BASE_URL", "GROKBOT_LLM_BASE_URL"),
+                ("GROKBOT_LLM_API_KEY", "GROKBOT_LLM_API_KEY"),
+                ("GROKBOT_LLM_MODEL", "GROKBOT_LLM_MODEL")):
+            value = os.environ.get(env_name, "")
+            if value:
+                payload[key] = value
+        asset_token = os.environ.get("GROKBOT_ASSET_TOKEN", "")
+        if asset_token:
+            payload["DEVBOX_HARNESS_LLM_TOKEN"] = asset_token
+            payload["DEVBOX_HARNESS_LLM_OPENAI_BASE_URL"] = (
+                os.environ.get(
+                    "GROKBOT_ASSET_ORIGIN",
+                    "https://app.devinai.net/internal/harness-llm/v1"))
+        return payload
+
+    def _provision_relay(self, api: DevBoxApi, session_id: str,
+                         path: str,
+                         payload: dict | None = None) -> tuple[int, dict]:
+        cap = self._mint_capability(api, session_id, 7813)
+        if cap is None:
+            return 0, {}
+        base = str(cap.get("url") or "").rstrip("/")
+        token = str(cap.get("token") or "")
+        if not base or not token:
+            return 0, {}
+        headers = {
+            "x-anyrun-network-token": token,
+            "user-agent": "devbox-bot/0.1",
+            "accept": "application/json",
+        }
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode()
+            headers["content-type"] = "application/json"
+        request = urllib.request.Request(
+            f"{base}{path}", data=data,
+            method="POST" if payload is not None else "GET",
+            headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                raw = response.read().decode("utf-8", "replace")
+                status = response.status
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", "replace")
+            status = exc.code
+        except (OSError, TimeoutError):
+            return 0, {}
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            body = {}
+        return status, body if isinstance(body, dict) else {}
+
+    def _send_stage_message(self, api: DevBoxApi, org_id: str,
+                            session_id: str) -> None:
+        api.send_message(org_id, session_id, BOX_STAGE_PROMPT)
+
+    def _provision_listener(self, api: DevBoxApi, org_id: str,
+                            session_id: str, box: dict,
+                            ident: dict) -> str:
+        payload = self._provision_payload(ident, org_id, box)
+        deadline = time.monotonic() + PROVISION_WAIT_S
+        reachable = False
+        while time.monotonic() < deadline:
+            status, body = self._provision_relay(
+                api, session_id, "/health")
+            if status == 200:
+                reachable = True
+                state = body.get("state")
+                if state == "awaiting":
+                    post_status, _post_body = self._provision_relay(
+                        api, session_id, "/provision", payload)
+                    if post_status in (202, 409):
+                        log.info("box %s provisioned via listener",
+                                 session_id)
+                        return "provision"
+                    if post_status not in (0, 502, 503, 504):
+                        raise ConnectError(
+                            "unavailable",
+                            f"box provision request failed: HTTP "
+                            f"{post_status}")
+                elif state in {"provisioning", "provisioned"}:
+                    return "provision"
+                else:
+                    raise ConnectError(
+                        "unavailable",
+                        "box listener returned an invalid health state")
+            elif status not in (0, 502, 503, 504):
+                reachable = True
+                raise ConnectError(
+                    "unavailable",
+                    f"box listener health failed: HTTP {status}")
+            time.sleep(5)
+        if reachable:
+            raise ConnectError(
+                "unavailable",
+                "box listener remained reachable but did not become ready")
+        self._send_stage_message(api, org_id, session_id)
+        log.warning("box %s provisioning fallback path=agent", session_id)
+        return "agent"
+
     def _ensure_box(self, ctx: dict) -> dict:
         api = self.api_for(ctx)
         ident = self._identity(api)
@@ -377,49 +496,47 @@ class DesktopBackend:
                 status = str(sess.get("status", "")).lower()
                 if status not in {"finished", "error", "expired",
                                   "deleted", "archived"}:
-                    # retry briefly: capability mint / relay probe can 503
-                    # while the guest is momentarily unreachable
-                    deadline = time.monotonic() + 60
-                    while time.monotonic() < deadline:
-                        coords = self._gateway_coords(
-                            api, session_id, box)
-                        if coords:
-                            return coords
-                        time.sleep(5)
+                    coords = self._gateway_coords(api, session_id, box)
+                    if coords:
+                        coords["provision_path"] = box.get(
+                            "provision_path", "provision")
+                        return coords
+                    if not box.get("inference_credential"):
+                        box["inference_credential"] = (
+                            secrets.token_urlsafe(32))
+                    box["provision_path"] = self._provision_listener(
+                        api, org_id, session_id, box, ident)
+                    self._save_box_state(ident, box)
+                    coords = self._await_gateway(api, session_id, box)
+                    coords["provision_path"] = box["provision_path"]
+                    log.info("box %s ready via %s", session_id,
+                             box["provision_path"])
+                    return coords
             except Exception as exc:  # noqa: BLE001 — stale box state is fine
                 log.debug("existing box check failed: %s", exc)
         # create a fresh box session
         gateway_token = secrets.token_urlsafe(32)
         inference_credential = secrets.token_urlsafe(32)
-        runtime_url = os.environ.get("GROKBOT_RUNTIME_URL", "")
         secret_ids = self._llm_secret_ids(api, org_id)
+        box = {
+            "session_id": "",
+            "gateway_token": gateway_token,
+            "inference_credential": inference_credential,
+            "created_at": time.time(),
+        }
+        payload = self._provision_payload(ident, org_id, box)
+        session_secrets = [{
+            "key": key,
+            "value": value,
+            "is_sensitive": any(
+                marker in key for marker in ("TOKEN", "CREDENTIAL", "API_KEY")),
+        } for key, value in payload.items()]
         session = api.create_session(
             org_id, BOX_PROMPT,
             title="Grok Bot box",
             tags=[BOX_TAG],
-            session_secrets=[
-                {"key": "GROKBOT_GATEWAY_TOKEN",
-                 "value": gateway_token, "is_sensitive": True},
-                {"key": "GROKBOT_INFERENCE_CREDENTIAL",
-                 "value": inference_credential, "is_sensitive": True},
-                {"key": "GROKBOT_RUNTIME_URL",
-                 "value": runtime_url, "is_sensitive": False},
-                {"key": "GROKBOT_USER_JSON",
-                 "value": json.dumps({
-                     "user_id": ident.get("user_id") or "",
-                     "org_id": org_id or "",
-                     "name": ident.get("name") or "",
-                 }), "is_sensitive": False},
-            ] + ([
-                {"key": "DEVBOX_HARNESS_LLM_TOKEN",
-                 "value": os.environ.get("GROKBOT_ASSET_TOKEN", ""),
-                 "is_sensitive": True},
-                {"key": "DEVBOX_HARNESS_LLM_OPENAI_BASE_URL",
-                 "value": os.environ.get(
-                     "GROKBOT_ASSET_ORIGIN",
-                     "https://app.devinai.net/internal/harness-llm/v1"),
-                 "is_sensitive": False},
-            ] if os.environ.get("GROKBOT_ASSET_TOKEN") else []),
+            image_family="Debian_12",
+            session_secrets=session_secrets,
             secret_ids=secret_ids or None,
         )
         session_id = session.get("session_id") or session.get(
@@ -427,12 +544,14 @@ class DesktopBackend:
         if not session_id:
             raise ConnectError("internal",
                                "session create returned no id")
-        box = {"session_id": session_id,
-               "gateway_token": gateway_token,
-               "inference_credential": inference_credential,
-               "created_at": time.time()}
+        box["session_id"] = session_id
+        self._save_box_state(ident, box)
+        box["provision_path"] = self._provision_listener(
+            api, org_id, session_id, box, ident)
         self._save_box_state(ident, box)
         coords = self._await_gateway(api, session_id, box)
+        coords["provision_path"] = box["provision_path"]
+        log.info("box %s ready via %s", session_id, box["provision_path"])
         return coords
 
     def _default_org(self, api: DevBoxApi) -> str:
@@ -501,6 +620,7 @@ class DesktopBackend:
             "network_token": token,
             "gateway_url": base,
             "gateway_token": box.get("gateway_token", ""),
+            "provision_path": box.get("provision_path", ""),
         }
 
     def _await_gateway(self, api: DevBoxApi, session_id: str,
