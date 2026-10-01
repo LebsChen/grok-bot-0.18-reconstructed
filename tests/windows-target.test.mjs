@@ -3,13 +3,13 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function importConfig(env = {}) {
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
-    import * as c from "${path.join(repoRoot, "scripts/lib/config.mjs").replaceAll("\\", "/")}";
+    import * as c from "${pathToFileURL(path.join(repoRoot, "scripts/lib/config.mjs")).href}";
     console.log(JSON.stringify({
       target: c.target,
       cachedRuntimeApp: c.cachedRuntimeApp,

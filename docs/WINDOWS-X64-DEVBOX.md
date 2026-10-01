@@ -208,7 +208,12 @@ design. `reconstructed-package.json` records this as `buildMode`
 
 ## 13. Security / trust boundaries
 
-* Gateway binds loopback in the guest; relay is the only ingress.
+* Gateway binds the guest interface (`GBBOX_BIND_HOST`, default `0.0.0.0`)
+  so the relay can reach it; every request still requires the Bearer
+  gateway token (`SAND_GATEWAY_REQUIRE_AUTH=1`) — the relay is the only
+  ingress. The descriptor on :1341 additionally restricts peers to
+  loopback plus the guest's IPv4 default gateway (the node host running
+  the relay; extendable via `GBBOX_DESCRIPTOR_ALLOW`).
 * Relay capability is per-session, per-port, short-lived; header is stripped
   before forwarding.
 * Browser origins are rejected by the gateway (403) so preview pages cannot
