@@ -53,37 +53,50 @@ result = {"uuid": uuid, "steps": []}
 step = result["steps"].append
 
 def login_at(origin):
-    """Fill the DevBox email+password login on <origin>."""
-    call("Page.navigate", {"url":
-        f"{origin}/auth/login?redirect=%2Fsettings%2Fpreferences"})
+    """Log in via the password-login API inside the page context, so the
+    session cookie lands on <origin>'s cookie jar."""
+    call("Page.navigate", {"url": f"{origin}/auth/login"})
     time.sleep(3)
-    for _ in range(3):
-        has_pw = ev("!!document.querySelector('input[type=password]')")
-        if has_pw:
-            ev('document.querySelector("input[type=password]").focus()')
-            call("Input.insertText", {"text": PASSWORD})
-            ev('[...document.querySelectorAll("button")].find('
-               'x=>/sign in|log in|continue/i.test(x.innerText))?.click()')
-            time.sleep(5)
-            continue
-        if ev("location.pathname.includes('/auth/login')") and \
-                ev("!!document.querySelector('input')"):
-            ev('document.querySelector("input").focus()')
-            call("Input.insertText", {"text": "user@devbox.local"})
-            ev('[...document.querySelectorAll("button")].find('
-               'x=>/log in|continue/i.test(x.innerText))?.click()')
-            time.sleep(4)
-            continue
-        break
-    return ev("location.href")
+    status = ev("""fetch('/api/auth1/password/login', {
+        method: 'POST', credentials: 'include',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({email: 'user@devbox.local',
+                              password: %s})}).then(r => r.status)"""
+        % json.dumps(PASSWORD))
+    time.sleep(2)
+    call("Page.navigate", {"url": f"{origin}/settings/preferences"})
+    time.sleep(4)
+    return {"apiStatus": status, "landed": ev("location.href")}
 
 
 # 1. DevBox web login on BOTH the CP origin and the OIDC origin
 #    (the session cookie is host-scoped, not port-scoped, but each
-#    service gates its own /auth/login -> authorize bounce).
-for origin in ("http://127.0.0.1:8000", "http://127.0.0.1:8001"):
+#    service gates its own /auth/login -> authorize bounce). Public
+#    origins when the bot uses the default public endpoints.
+LOGIN_ORIGINS = os.environ.get(
+    "OIDC_LOGIN_ORIGINS",
+    "http://127.0.0.1:8000,http://127.0.0.1:8001").split(",")
+for origin in LOGIN_ORIGINS:
     url1 = login_at(origin)
     step({"step": f"web login {origin}", "landed": url1})
+
+# The OIDC issuer (auth.*) may not serve the password-login route;
+# copy the IdP session cookie over via CDP if login there failed.
+cookies = call("Storage.getCookies").get("cookies", [])
+oidc_host = urllib.parse.urlparse(LOGIN_ORIGINS[-1]).hostname
+have = {c["name"] for c in cookies
+        if oidc_host.endswith(c.get("domain", "").lstrip("."))
+        or c.get("domain", "").endswith(oidc_host.split(".", 1)[-1])}
+if "devbox_oidc_session" not in have:
+    src = next((c for c in cookies
+                if c["name"] == "devbox_oidc_session"), None)
+    if src:
+        call("Network.setCookie", {
+            "name": "devbox_oidc_session", "value": src["value"],
+            "url": LOGIN_ORIGINS[-1], "path": "/",
+            "httpOnly": True, "secure": True, "sameSite": "None"})
+        step({"step": "cookie transplant to OIDC origin",
+              "from": src.get("domain")})
 
 # 2. loginDeepControl -> authorize -> callback
 call("Page.navigate", {"url":
@@ -165,6 +178,11 @@ if tok.count(".") == 2:
             step({"step": "oauth/token refresh",
                   "status": getattr(e, "code", 0), "error": str(e)})
     result["ok"] = True
+    tok_path = os.environ.get("OIDC_TOKEN_OUT")
+    if tok_path:
+        with open(tok_path, "w") as fh:
+            json.dump(poll_body, fh)
+        os.chmod(tok_path, 0o600)
 
 ws.close()
 with open(OUT, "w") as fh:

@@ -119,11 +119,17 @@ class _State:
                 dir=str(self.path.parent), prefix="state-")
             try:
                 os.write(fd, json.dumps(self.data).encode())
-                os.fchmod(fd, 0o600)
+                try:
+                    os.fchmod(fd, 0o600)
+                except AttributeError:
+                    pass  # Windows: chmod the path below instead
             finally:
                 os.close(fd)
             os.replace(tmp, self.path)
-            os.chmod(self.path, 0o600)
+            try:
+                os.chmod(self.path, 0o600)
+            except OSError:
+                pass
 
     def get(self, *keys, default=None):
         node = self.data
