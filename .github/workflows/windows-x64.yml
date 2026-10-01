@@ -37,11 +37,11 @@ jobs:
           DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
         run: node scripts/ci/devbox-gateway-smoke.mjs gateway-smoke.json
       - name: DevBox backend smoke (plugin/bot)
-        if: secrets.DEVBOX_API_KEY != ''
         env:
           DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
           PYTHONPATH: ${{ github.workspace }}/devbox-bot
         run: |
+          if (-not $env:DEVBOX_API_KEY) { Write-Host "DEVBOX_API_KEY secret absent; skipping"; exit 0 }
           python -m pip install -r devbox-bot/requirements.txt
           node scripts/ci/devbox-backend-smoke.mjs backend-smoke.json
       - name: Launch smoke (devbox_bot.desktop + CDP sign-in)
