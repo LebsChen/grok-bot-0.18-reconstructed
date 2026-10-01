@@ -124,3 +124,7 @@ runtime types:
 GROKBOT_FORK_ROOT=/path/to/grok-bot \
     node plugin/bot/tools/gen_descriptors.mjs
 ```
+
+---
+Vendored copy of DevBox `plugin/bot` (private repo).
+Sync source: DevBox branch `devin/1786279869-session-page-menus` at `f73b9b46` plus the pending identity-keyed box-state fix (re-vendor after its push).

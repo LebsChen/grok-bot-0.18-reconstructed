@@ -321,7 +321,8 @@ class DesktopBackend:
         @r.unary("aiserver.v1.GrokBotService", "ListSandBoxes")
         def _list_boxes(_req, ctx):
             api = self.api_for(ctx)
-            box = self.state.get("box", api.token) or {}
+            ident = self._identity(api)
+            box = self._box_state(ident)
             running = bool(box.get("session_id"))
             return {"boxes": [{"running": running}]}
 
@@ -335,12 +336,32 @@ class DesktopBackend:
         return models or ["devbox-default"]
 
     # ── box allocation over existing v3 session APIs ──────────────
-    def _box_state(self, token: str) -> dict:
-        return dict(self.state.get("box", token) or {})
+    def _box_key(self, ident: dict) -> str:
+        # keyed by stable identity, NOT the bearer — OIDC refresh
+        # rotates access tokens and would orphan the box otherwise
+        return f"{ident.get('org_id') or ''}:{ident.get('user_id') or 'anon'}"
 
-    def _save_box_state(self, token: str, box: dict) -> None:
+    def _box_state(self, ident: dict) -> dict:
+        box = self.state.get("box") or {}
+        key = self._box_key(ident)
+        if key in box:
+            return dict(box[key])
+        # migrate the legacy token-keyed entry (pre-identity keys):
+        # only when exactly one box exists do we attribute it to this
+        # caller — otherwise we can't tell which token maps here
+        legacy = {k: v for k, v in box.items()
+                  if ":" not in k or k.count(":") > 1}
+        if len(legacy) == 1 and ident.get("user_id"):
+            entry = next(iter(legacy.values()))
+            box[self._box_key(ident)] = entry
+            self.state.data["box"] = box
+            self.state.save()
+            return dict(entry)
+        return {}
+
+    def _save_box_state(self, ident: dict, box: dict) -> None:
         boxes = dict(self.state.data.get("box") or {})
-        boxes[token] = box
+        boxes[self._box_key(ident)] = box
         self.state.data["box"] = boxes
         self.state.save()
 
@@ -348,7 +369,7 @@ class DesktopBackend:
         api = self.api_for(ctx)
         ident = self._identity(api)
         org_id = ident.get("org_id") or self._default_org(api)
-        box = self._box_state(api.token)
+        box = self._box_state(ident)
         session_id = box.get("session_id", "")
         if session_id:
             try:
@@ -410,7 +431,7 @@ class DesktopBackend:
                "gateway_token": gateway_token,
                "inference_credential": inference_credential,
                "created_at": time.time()}
-        self._save_box_state(api.token, box)
+        self._save_box_state(ident, box)
         coords = self._await_gateway(api, session_id, box)
         return coords
 
@@ -499,14 +520,14 @@ class DesktopBackend:
         api = self.api_for(ctx)
         ident = self._identity(api)
         org_id = ident.get("org_id") or self._default_org(api)
-        box = self._box_state(api.token)
+        box = self._box_state(ident)
         session_id = box.get("session_id", "")
         if session_id:
             try:
                 api.delete_session(org_id, session_id)
             except Exception as exc:  # noqa: BLE001 — recreate is best-effort
                 log.debug("box session delete failed: %s", exc)
-            self._save_box_state(api.token, {})
+            self._save_box_state(ident, {})
         self._ensure_box(ctx)
         return {"started": True, "reason": "recreated"}
 
@@ -514,7 +535,7 @@ class DesktopBackend:
         api = self.api_for(ctx)
         ident = self._identity(api)
         org_id = ident.get("org_id") or self._default_org(api)
-        box = self._box_state(api.token)
+        box = self._box_state(ident)
         session_id = box.get("session_id", "")
         state = 1  # ABSENT
         if session_id:

@@ -57,12 +57,12 @@ def login_at(origin):
     session cookie lands on <origin>'s cookie jar."""
     call("Page.navigate", {"url": f"{origin}/auth/login"})
     time.sleep(3)
-    status = ev("""fetch('/api/auth1/password/login', {
+    status = ev(f"""fetch('/api/auth1/password/login', {{
         method: 'POST', credentials: 'include',
-        headers: {'content-type': 'application/json'},
-        body: JSON.stringify({email: 'user@devbox.local',
-                              password: %s})}).then(r => r.status)"""
-        % json.dumps(PASSWORD))
+        headers: {{'content-type': 'application/json'}},
+        body: JSON.stringify({{email: 'user@devbox.local',
+                              password: {json.dumps(PASSWORD)}}})}})
+        .then(r => r.status)""")
     time.sleep(2)
     call("Page.navigate", {"url": f"{origin}/settings/preferences"})
     time.sleep(4)
