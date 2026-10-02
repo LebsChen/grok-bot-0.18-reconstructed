@@ -99,7 +99,7 @@ if [ ! -f "$MARKER" ]; then
     wait "${pids[@]}"
     cat "$GB_HOME"/.part-* > "$PACK" && rm -f "$GB_HOME"/.part-*
   else
-    curl --http1.1 -fL --connect-timeout 15 --max-time 600 \
+    curl --http1.1 -fL --connect-timeout 15 \
       --speed-limit 5120 --speed-time 30 \
       --retry 5 --retry-all-errors --retry-delay 2 \
       -C - "${AUTH[@]}" -o "$PACK" "$RUNTIME_URL"

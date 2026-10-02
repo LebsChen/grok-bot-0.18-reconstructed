@@ -860,11 +860,12 @@ def test_start_box_bounds_runtime_downloads_and_retries_size_head():
                     if '"$PACK"' in command)
     assert "--speed-limit 5120" in fallback
     assert "--speed-time 30" in fallback
-    assert "--max-time 600" in fallback
+    assert "--max-time 600" not in fallback
     assert "--retry 5" in fallback
     assert "--retry-all-errors" in fallback
     assert "--retry-delay 2" in fallback
     assert "-C -" in fallback
+    assert script.index('rm -f "$PACK"') > script.index("-C -")
 
     checksum = next(command for command in downloads
                     if 'RUNTIME_URL.sha256' in command)
