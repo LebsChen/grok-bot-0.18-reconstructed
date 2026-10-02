@@ -58,6 +58,49 @@ async function http(method, path, { token, json, headers } = {}) {
   return { status: resp.status, body };
 }
 
+function collectAssistantText(value, result = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectAssistantText(item, result);
+    return result;
+  }
+  if (!value || typeof value !== "object") return result;
+  const role = String(value.role ?? value.speaker ?? value.author ?? "")
+    .toLowerCase();
+  if (role === "assistant") {
+    if (typeof value.text === "string") result.push(value.text);
+    if (typeof value.content === "string") result.push(value.content);
+    if (Array.isArray(value.content)) {
+      for (const part of value.content) {
+        if (typeof part?.text === "string") result.push(part.text);
+      }
+    } else if (typeof value.content?.text === "string") {
+      result.push(value.content.text);
+    }
+  }
+  for (const child of Object.values(value)) collectAssistantText(child, result);
+  return result;
+}
+
+function hasExecToolCall(value) {
+  if (Array.isArray(value)) return value.some(hasExecToolCall);
+  if (!value || typeof value !== "object") return false;
+  const isExec = (name) =>
+    typeof name === "string" &&
+    name.toLowerCase().replace(/[_-]/g, "") === "exec";
+  const names = [
+    value.toolName,
+    value.tool_name,
+    value.name,
+    value.function?.name,
+    value.tool?.name,
+    value.tool?.case,
+    value.value?.tool?.case,
+  ];
+  if (names.some(isExec)) return true;
+  if (isExec(value.toolResult?.toolName ?? value.toolResult?.name)) return true;
+  return Object.values(value).some(hasExecToolCall);
+}
+
 // 1. headless approve
 const approve = await step("loginDeepControl/approve", () =>
   http("POST", "/loginDeepControl/approve", {
@@ -83,7 +126,12 @@ const refreshed = await step("oauth/token refresh", () =>
   http("POST", "/oauth/token", {
     json: { client_id: PROD_CLIENT_ID, grant_type: "refresh_token",
             refresh_token: refreshToken } }),
-  (r) => ({ httpStatus: r.status, keys: Object.keys(r.body ?? {}) }));
+  (r) => {
+    if (r.status !== 200 || !r.body?.access_token) {
+      throw new Error(`refresh failed (HTTP ${r.status})`);
+    }
+    return { httpStatus: r.status, keys: Object.keys(r.body ?? {}) };
+  });
 const liveAccess = refreshed?.body?.access_token ?? accessToken;
 
 // Connect transport with bearer
@@ -108,16 +156,27 @@ await step("DashboardService.GetMe", () => dash.getMe({}),
 // 5. AvailableModels
 const catalog = await step("AiService.AvailableModels", () =>
   ai.availableModels({ useModelParameters: true, scope: 1 }),
-  (r) => ({ modelCount: r.models.length,
-            names: r.models.map(m => m.name).slice(0, 5) }));
+  (r) => {
+    const names = r.models.map(m => m.name);
+    if (!names.length) throw new Error("model catalog is empty");
+    if (process.env.GROKBOT_LLM_MODEL &&
+        !names.includes(process.env.GROKBOT_LLM_MODEL)) {
+      throw new Error("configured LLM model is not available");
+    }
+    return { modelCount: names.length, names: names.slice(0, 5) };
+  });
 
 // 6. EnsureSandBox
 const box = await step("GrokBotService.EnsureSandBox", () =>
   grokBot.ensureSandBox({}),
-  (r) => ({ podId: r.podId, cluster: r.cluster,
-            hasGatewayUrl: Boolean(r.gatewayUrl),
-            hasGatewayToken: Boolean(r.gatewayToken),
-            hasNetworkToken: Boolean(r.networkToken) }));
+  (r) => {
+    if (!r.podId || !r.gatewayUrl || !r.gatewayToken || !r.networkToken) {
+      throw new Error("EnsureSandBox returned incomplete session details");
+    }
+    return { podId: r.podId, cluster: r.cluster,
+             hasGatewayUrl: true, hasGatewayToken: true,
+             hasNetworkToken: true };
+  });
 
 let gateway = null;
 if (box) {
@@ -140,19 +199,32 @@ if (box) {
   await step("gateway /health", async () => {
     const resp = await gh("GET", "/health");
     return { status: resp.status };
-  }, (r) => ({ httpStatus: r.status }));
+  }, (r) => {
+    if (r.status !== 200) throw new Error(`/health returned HTTP ${r.status}`);
+    return { httpStatus: r.status };
+  });
   // 8. listAgents unauth -> 401
   await step("gateway /api/listAgents no-bearer 401", async () => {
     const resp = await gh("POST", "/api/listAgents");
     return { status: resp.status };
-  }, (r) => ({ httpStatus: r.status }));
+  }, (r) => {
+    if (r.status !== 401) {
+      throw new Error(`unauthenticated listAgents returned HTTP ${r.status}`);
+    }
+    return { httpStatus: r.status };
+  });
   // 9. listAgents with gateway token -> 200
   const agents = await step("gateway /api/listAgents bearer", async () => {
     const resp = await gh("POST", "/api/listAgents",
                           { bearer: gateway.token });
     const body = await resp.json().catch(() => null);
     return { status: resp.status, count: Array.isArray(body) ? body.length : -1 };
-  }, (r) => ({ httpStatus: r.status, agentCount: r.count }));
+  }, (r) => {
+    if (r.status !== 200 || r.count < 0) {
+      throw new Error(`authenticated listAgents returned HTTP ${r.status}`);
+    }
+    return { httpStatus: r.status, agentCount: r.count };
+  });
   // 10. /events first SSE frame
   await step("gateway /events first frame", async () => {
     const controller = new AbortController();
@@ -177,12 +249,19 @@ if (box) {
         if (chunk.includes("data:")) break;
       }
       controller.abort();
-      const dataLine = (chunk.match(/data:[^\n]*/) ?? [""])[0].slice(0, 160);
+      const hasDataLine = (chunk.match(/data:[^\n]*/) ?? [""])[0]
+        .startsWith("data:");
       return { status: resp.status, contentType: resp.headers.get("content-type"),
-               dataLine };
+               hasDataLine };
     } finally { clearTimeout(timer); }
-  }, (r) => ({ httpStatus: r.status, contentType: r.contentType,
-               firstData: r.dataLine }));
+  }, (r) => {
+    if (r.status !== 200 || !r.contentType?.includes("text/event-stream") ||
+        !r.hasDataLine) {
+      throw new Error("gateway events stream did not return its first frame");
+    }
+    return { httpStatus: r.status, contentType: r.contentType,
+             hasDataLine: true };
+  });
 
   // 11. guest-originated inference: /api/sendPrompt through the gateway so
   // host-main calls /sand-box/inference-credential + InferenceService.Stream
@@ -206,7 +285,8 @@ if (box) {
                  "content-type": "application/json" },
       body: JSON.stringify({ agentId, prompt: "Reply with the single word: ok" }),
     });
-    let reply = "";
+    let assistantReply = "";
+    let execInvoked = false;
     for (let i = 0; i < 30; i += 1) {
       await new Promise(r => setTimeout(r, 2000));
       const tr = await fetch(
@@ -216,28 +296,38 @@ if (box) {
                      authorization: `Bearer ${gateway.token}`,
                      "content-type": "application/json" },
           body: JSON.stringify({ agentId }) });
+      if (!tr.ok) throw new Error(`getTranscript returned HTTP ${tr.status}`);
       const body = await tr.json().catch(() => null);
-      const text = JSON.stringify(body ?? "");
-      if (/ok|assistant|content/i.test(text) && text.length > 30) {
-        reply = text.slice(0, 200);
-        break;
-      }
+      const assistantTexts = collectAssistantText(body);
+      assistantReply = assistantTexts.find(text => /\bok\b/i.test(text)) ?? "";
+      execInvoked ||= hasExecToolCall(body);
+      if (assistantReply) break;
     }
     return { createStatus: create.status, sendStatus: send.status,
-             agentId: agentId ? "<set>" : "", replyLen: reply.length,
-             replySnippet: reply.slice(0, 120) };
+             agentId: agentId ? "<set>" : "",
+             assistantReplyFound: Boolean(assistantReply),
+             assistantReplySnippet: assistantReply.slice(0, 80),
+             execInvoked };
   }, (r) => {
-    if (!(r?.replyLen > 0)) throw new Error(
-      `no model reply (create=${r?.createStatus} send=${r?.sendStatus})`);
+    if (r?.createStatus !== 200 || r.sendStatus < 200 || r.sendStatus >= 300) {
+      throw new Error(
+        `agent request failed (create=${r?.createStatus} send=${r?.sendStatus})`);
+    }
+    if (!r.assistantReplyFound) {
+      throw new Error("assistant transcript did not contain the expected reply");
+    }
+    if (r.execInvoked) throw new Error("agent turn invoked the exec tool");
     return { createStatus: r.createStatus, sendStatus: r.sendStatus,
-             replyLen: r.replyLen };
+             assistantReplyFound: r.assistantReplyFound,
+             execInvoked: r.execInvoked };
   });
 }
 
 // 12. direct InferenceService.Stream
 await step("InferenceService.Stream direct", async () => {
   const req = {
-    modelId: catalog?.models?.[0]?.name ?? "",
+    modelId: process.env.GROKBOT_LLM_MODEL
+      ?? catalog?.models?.[0]?.name ?? "",
     invocationId: randomUUID(),
     messages: [{ role: 1, content: { case: "text", value: "Say the word: ping" } }],
   };
@@ -272,7 +362,8 @@ if (streamStep?.status === "fail" &&
   streamStep.status = "skip";
   streamStep.note = "GROKBOT_LLM_API_KEY absent; skipping";
 }
-const ok = steps.every(s => s.status === "pass" || s.status === "skip");
+const ok = steps.length === 12 &&
+  steps.every(s => s.status === "pass" || s.status === "skip");
 writeFileSync(OUT, JSON.stringify({
   ok, origin: ORIGIN, node: process.version,
   platform: process.platform, arch: process.arch,

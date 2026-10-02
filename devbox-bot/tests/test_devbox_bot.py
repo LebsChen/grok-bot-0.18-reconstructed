@@ -159,6 +159,33 @@ def test_refresh_passthrough(desktop, monkeypatch):
     assert json.loads(body)["shouldLogout"] is True
 
 
+def test_headless_refresh_returns_oauth_token_fields(tmp_path, monkeypatch):
+    backend = DesktopBackend(
+        port=0, api_key="cog-test", state_path=tmp_path / "state.json")
+    backend.state.data["refresh"] = {"gbr_local_refresh": "old-access"}
+    monkeypatch.setattr(
+        backend, "_headless_tokens",
+        lambda: {"accessToken": "new-access",
+                 "refreshToken": "new-refresh", "authId": "user"})
+    handler = make_handler(backend.router(), backend.extra_routes())
+    server, port = _serve(handler)
+    try:
+        status, body, _ = _req(
+            port, "POST", "/oauth/token",
+            json.dumps({"client_id": "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB",
+                        "grant_type": "refresh_token",
+                        "refresh_token": "gbr_local_refresh"}).encode(),
+            {"content-type": "application/json"})
+        tokens = json.loads(body)
+        assert status == 200
+        assert tokens["access_token"] == "new-access"
+        assert tokens["refresh_token"] == "new-refresh"
+        assert tokens["token_type"] == "Bearer"
+        assert "accessToken" not in tokens
+    finally:
+        server.shutdown()
+
+
 # ── Connect framing ─────────────────────────────────────────────────
 
 def test_unary_proto_roundtrip(desktop):
@@ -537,6 +564,22 @@ def _wait_listener(port, proc, timeout=10):
         except OSError:
             time.sleep(0.1)
     raise AssertionError("provision listener did not become ready")
+
+
+def test_start_box_uses_packaged_node_runtime():
+    script = (Path(__file__).resolve().parent.parent / "box" /
+              "start-box.sh").read_text()
+    assert 'NODE_BIN="$PACK_DIR/node"' in script
+    assert ('exec setsid "$NODE_BIN" --disable-warning=ExperimentalWarning '
+            '"$HOST_MAIN"') in script
+    assert 'exec setsid node "$HOST_MAIN"' not in script
+
+
+def test_start_box_retries_runtime_downloads_over_http1():
+    script = (Path(__file__).resolve().parent.parent / "box" /
+              "start-box.sh").read_text()
+    assert script.count("--http1.1") == 4
+    assert script.count("--retry-all-errors") == 2
 
 
 def test_provision_listener_flow_and_second_post_409(tmp_path):

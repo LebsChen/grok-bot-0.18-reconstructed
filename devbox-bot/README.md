@@ -1,6 +1,6 @@
 # devbox_bot — Grok Bot ↔ DevBox bridge (plugin/bot)
 
-> Vendored from DevBox `plugin/bot/` at source commit `8f964f79` (2026-10-01).
+> Vendored from DevBox `plugin/bot/` at source commit `5111611e` (2026-10-02).
 
 A standalone backend that lets the Grok Bot desktop (Cursor fork) run
 entirely against a DevBox deployment — sign-in, account, box allocation
@@ -43,6 +43,8 @@ It accepts allow-listed credentials over guest port 7813, writes
 turn. `GET /health` reports `awaiting`, `provisioning`, or `provisioned`;
 `GET /status` reports the current startup phase, process pids, disk and
 `/home/box` details, and a redacted tail of the startup logs.
+`start-box.sh` uses the packaged Node runtime and HTTP/1.1 retry flags for
+runtime-pack downloads.
 
 `devbox_bot.box` runs inside the box VM and serves `/sand-box/inference-credential` +
 `InferenceService.Stream` so the in-box host-main's model calls end at
@@ -87,14 +89,15 @@ Box (in the VM, set by session/org secrets):
 
 `plugin/bot/tools/configure_devbox.py` creates or updates:
 
-1. org secrets `GROKBOT_LLM_BASE_URL` / `GROKBOT_LLM_API_KEY` /
-   `GROKBOT_LLM_MODEL`
+1. org secrets `DEVBOX_API_KEY`, `GROKBOT_LLM_BASE_URL` /
+   `GROKBOT_LLM_API_KEY` / `GROKBOT_LLM_MODEL`
 2. an org-target blueprint that stages `start-box.sh` and `provision.py`
    and starts the listener on `0.0.0.0:7813` (`--provision-idle-s`
    defaults to 900 seconds)
 
 Set `DEVBOX_API_KEY` and the three `GROKBOT_LLM_*` variables in the process
-environment, then run:
+environment (for example, source a mode-0600 env file without printing it),
+then run:
 
 ```bash
 python plugin/bot/tools/configure_devbox.py --org <org>
@@ -109,11 +112,22 @@ desktop sends an agent-staging follow-up and records `provision_path:
 "agent"`; otherwise it records `provision_path: "provision"`. Reuse
 re-provisions if the listener reports `awaiting`.
 
+## Live verification
+
+The post-rotation fresh-box check reached gateway health in 20.049 seconds
+with `provision_path=provision`; guest `/status` was captured during
+provisioning. An ordinary non-box session showed the listener idling out
+without a runtime download. The strict 12-step smoke currently records
+10/12: direct inference was rejected with `API_KEY_QUOTA_EXHAUSTED`, and the
+guest transcript endpoint returned 404, leaving the no-`exec` assertion
+unverified. See `.devin/evidence/5cbcbfbd-grokbot-provision/` for details.
+
 ## Security
 
 - State file (`~/.local/state/devbox-bot/state.json` or
-  `%LOCALAPPDATA%\devbox-bot\state.json`) is mode 0600 and maps
-  issued tokens → DevBox credentials; box tokens are per-box random.
+  `%LOCALAPPDATA%\devbox-bot\state.json`) is mode 0600 and stores token/
+  refresh maps plus per-box metadata keyed by `org:user`; box tokens are
+  per-box random. Never dump or log this file.
 - `DEVBOX_API_KEY` headless mode is *refused* unless the env var is set;
   it is for single-user/CI only.
 - `devbox_bot.box` binds 127.0.0.1; the host-main gateway requires its

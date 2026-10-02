@@ -828,7 +828,13 @@ class DesktopBackend:
                     if mapped is None:
                         _json(h, 200, {"shouldLogout": True})
                         return
-                    _json(h, 200, self._headless_tokens())
+                    tokens = self._headless_tokens()
+                    _json(h, 200, {
+                        "access_token": tokens.get("accessToken", ""),
+                        "refresh_token": tokens.get("refreshToken", refresh),
+                        "token_type": "Bearer",
+                        "expires_in": 3600,
+                    })
                     return
                 status, body = DevBoxApi.oidc_token(
                     self.auth_origin, {

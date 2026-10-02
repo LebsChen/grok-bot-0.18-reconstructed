@@ -187,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     origin = args.origin.rstrip("/")
     print(f"org={args.org} origin={origin}")
     ids = _secret_ids(api_key, origin, args.org, {
+        "DEVBOX_API_KEY": api_key,
         "GROKBOT_LLM_BASE_URL": os.environ.get(
             "GROKBOT_LLM_BASE_URL", ""),
         "GROKBOT_LLM_API_KEY": os.environ.get(

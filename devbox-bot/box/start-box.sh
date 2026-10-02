@@ -75,7 +75,7 @@ if [ ! -f "$MARKER" ]; then
   fi
   # Guest egress to public hosts is slow single-stream (~40KB/s); pull
   # the pack as parallel byte-range chunks.  Re-runs resume per part.
-  SIZE="$(curl -fsIL --connect-timeout 15 --max-time 30 "${AUTH[@]}" \
+  SIZE="$(curl --http1.1 -fsIL --connect-timeout 15 --max-time 30 "${AUTH[@]}" \
       "$RUNTIME_URL" | awk 'BEGIN{IGNORECASE=1} /^content-length:/ {n=$2} END{gsub(/\r/,"",n); print n}')"
   if [ -n "$SIZE" ] && [ "$SIZE" -gt 1048576 ] 2>/dev/null; then
     N=8; PART=$(( (SIZE + N - 1) / N )); pids=()
@@ -87,7 +87,7 @@ if [ ! -f "$MARKER" ]; then
           have=0; [ -f "$GB_HOME/.part-$i" ] && have=$(stat -c%s "$GB_HOME/.part-$i")
           want=$((e - s + 1))
           [ "$have" -ge "$want" ] && break
-          curl -fL --connect-timeout 15 --speed-limit 5120 --speed-time 120 \
+          curl --http1.1 -fL --connect-timeout 15 --speed-limit 5120 --speed-time 120 \
             -r $((s + have))-$e "${AUTH[@]}" \
             -o - "$RUNTIME_URL" >> "$GB_HOME/.part-$i" && break
           sleep 2
@@ -97,10 +97,12 @@ if [ ! -f "$MARKER" ]; then
     wait "${pids[@]}"
     cat "$GB_HOME"/.part-* > "$PACK" && rm -f "$GB_HOME"/.part-*
   else
-    curl -fL --connect-timeout 15 --max-time 1200 --retry 3 \
+    curl --http1.1 -fL --connect-timeout 15 --max-time 1200 \
+      --retry 3 --retry-all-errors \
       -C - "${AUTH[@]}" -o "$PACK" "$RUNTIME_URL"
   fi
-  curl -fL --connect-timeout 15 --max-time 60 --retry 3 \
+  curl --http1.1 -fL --connect-timeout 15 --max-time 60 \
+    --retry 3 --retry-all-errors \
     "${AUTH[@]}" -o "$PACK.sha256" "$RUNTIME_URL.sha256"
   (cd "$GB_HOME" && sha256sum -c "$PACK_NAME.sha256")
   echo "start-box: phase=extract"
@@ -156,6 +158,11 @@ if [ -z "$HOST_MAIN" ]; then
   echo "start-box: host-main not found in runtime pack" >&2
   exit 1
 fi
+NODE_BIN="$PACK_DIR/node"
+if [ ! -x "$NODE_BIN" ]; then
+  echo "start-box: packaged node runtime not found" >&2
+  exit 1
+fi
 
 SAND_DATA_ROOT="${SAND_DATA_ROOT:-$HOME/.sand}"
 mkdir -p "$SAND_DATA_ROOT"
@@ -181,7 +188,7 @@ if ! curl -fsS -o /dev/null "http://127.0.0.1:1340/health" \
     export SAND_INFERENCE_RENEWAL_CREDENTIAL="$GROKBOT_INFERENCE_CREDENTIAL"
     export NODE_PATH="$PACK_DIR/node_modules"
     export SAND_TREE_SITTER_NODE_DEPS="$PACK_DIR/node_modules"
-    exec setsid node "$HOST_MAIN" \
+    exec setsid "$NODE_BIN" --disable-warning=ExperimentalWarning "$HOST_MAIN" \
       >>"$LOG_DIR/host-main.log" 2>&1 < /dev/null
   ) &
   printf '%s\n' "$!" > "$GB_HOME/host-main.pid"
