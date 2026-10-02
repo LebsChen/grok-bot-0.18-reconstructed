@@ -81,6 +81,48 @@ function collectAssistantText(value, result = []) {
   return result;
 }
 
+function scrubDiagnosticText(value) {
+  let text = String(value ?? "");
+  for (const secret of [
+    API_KEY,
+    process.env.GROKBOT_LLM_API_KEY ?? "",
+    process.env.github_pat ?? "",
+  ].filter(Boolean)) {
+    text = text.replaceAll(secret, "<redacted>");
+  }
+  return text
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer <redacted>")
+    .replace(/\b(?:eyJhbGci|gbr_local_|cog_|ghp_|github_pat_|sk-)[A-Za-z0-9._-]{8,}\b/g,
+             "<redacted>")
+    .slice(0, 120);
+}
+
+function findQuotaError(value) {
+  if (typeof value === "string") {
+    if (/API_KEY_QUOTA_EXHAUSTED/i.test(value)) {
+      return "API_KEY_QUOTA_EXHAUSTED";
+    }
+    return /\bquota\b/i.test(value) ? "quota" : "";
+  }
+  if (Array.isArray(value)) {
+    return value.map(findQuotaError).find(Boolean) ?? "";
+  }
+  if (!value || typeof value !== "object") return "";
+  return Object.values(value).map(findQuotaError).find(Boolean) ?? "";
+}
+
+function findQuotaErrorText(value) {
+  if (typeof value === "string") {
+    return /API_KEY_QUOTA_EXHAUSTED|\bquota\b/i.test(value)
+      ? scrubDiagnosticText(value) : "";
+  }
+  if (Array.isArray(value)) {
+    return value.map(findQuotaErrorText).find(Boolean) ?? "";
+  }
+  if (!value || typeof value !== "object") return "";
+  return Object.values(value).map(findQuotaErrorText).find(Boolean) ?? "";
+}
+
 function hasExecToolCall(value) {
   if (Array.isArray(value)) return value.some(hasExecToolCall);
   if (!value || typeof value !== "object") return false;
@@ -287,26 +329,56 @@ if (box) {
     });
     let assistantReply = "";
     let execInvoked = false;
+    let assistantMessagePresent = false;
+    let transcriptRetrieved = false;
+    let quotaErrorCode = "";
+    let transcriptDiagnostic = "";
     for (let i = 0; i < 30; i += 1) {
       await new Promise(r => setTimeout(r, 2000));
       const tr = await fetch(
-        `${gateway.base}/api/getTranscript`,
+        `${gateway.base}/api/getAgentTranscript`,
         { method: "POST",
           headers: { "x-anyrun-network-token": gateway.networkToken,
                      authorization: `Bearer ${gateway.token}`,
                      "content-type": "application/json" },
-          body: JSON.stringify({ agentId }) });
-      if (!tr.ok) throw new Error(`getTranscript returned HTTP ${tr.status}`);
+          body: JSON.stringify({ id: agentId }) });
+      if (!tr.ok) {
+        const errorBody = await tr.json().catch(() => null);
+        const errorText = scrubDiagnosticText(errorBody?.error);
+        throw new Error(
+          `getAgentTranscript returned HTTP ${tr.status}; error=${errorText}; ` +
+          "transcriptRetrieved=false; assistantMessagePresent=false; " +
+          "assistantReplyFound=false; quotaErrorInTranscript=false; " +
+          "execInvoked=unknown");
+      }
+      transcriptRetrieved = true;
       const body = await tr.json().catch(() => null);
       const assistantTexts = collectAssistantText(body);
+      assistantMessagePresent ||= assistantTexts.length > 0;
       assistantReply = assistantTexts.find(text => /\bok\b/i.test(text)) ?? "";
+      quotaErrorCode ||= findQuotaError(body);
+      transcriptDiagnostic ||= findQuotaErrorText(body);
       execInvoked ||= hasExecToolCall(body);
-      if (assistantReply) break;
+      if (assistantReply || quotaErrorCode) break;
+    }
+    if (!assistantReply) {
+      throw new Error(
+        `assistant reply not found; transcriptRetrieved=${transcriptRetrieved}; ` +
+        `assistantMessagePresent=${assistantMessagePresent}; ` +
+        `assistantReplyFound=false; quotaErrorInTranscript=${Boolean(quotaErrorCode)}; ` +
+        `quotaErrorCode=${quotaErrorCode || "none"}; ` +
+        `transcriptDiagnostic=${transcriptDiagnostic || "none"}; ` +
+        `execInvoked=${execInvoked}`);
     }
     return { createStatus: create.status, sendStatus: send.status,
              agentId: agentId ? "<set>" : "",
+             transcriptRetrieved,
+             assistantMessagePresent,
              assistantReplyFound: Boolean(assistantReply),
              assistantReplySnippet: assistantReply.slice(0, 80),
+             quotaErrorInTranscript: Boolean(quotaErrorCode),
+             quotaErrorCode,
+             transcriptDiagnostic,
              execInvoked };
   }, (r) => {
     if (r?.createStatus !== 200 || r.sendStatus < 200 || r.sendStatus >= 300) {
@@ -314,11 +386,27 @@ if (box) {
         `agent request failed (create=${r?.createStatus} send=${r?.sendStatus})`);
     }
     if (!r.assistantReplyFound) {
-      throw new Error("assistant transcript did not contain the expected reply");
+      throw new Error(
+        `assistant transcript did not contain the expected reply; ` +
+        `transcriptRetrieved=${r.transcriptRetrieved}; ` +
+        `assistantMessagePresent=${r.assistantMessagePresent}; ` +
+        `quotaErrorInTranscript=${r.quotaErrorInTranscript}; ` +
+        `quotaErrorCode=${r.quotaErrorCode || "none"}; ` +
+        `transcriptDiagnostic=${r.transcriptDiagnostic || "none"}; ` +
+        `execInvoked=${r.execInvoked}`);
     }
-    if (r.execInvoked) throw new Error("agent turn invoked the exec tool");
+    if (r.execInvoked) {
+      throw new Error(
+        `agent turn invoked the exec tool; transcriptRetrieved=${r.transcriptRetrieved}; ` +
+        `assistantReplyFound=${r.assistantReplyFound}; execInvoked=true`);
+    }
     return { createStatus: r.createStatus, sendStatus: r.sendStatus,
+             transcriptRetrieved: r.transcriptRetrieved,
+             assistantMessagePresent: r.assistantMessagePresent,
              assistantReplyFound: r.assistantReplyFound,
+             quotaErrorInTranscript: r.quotaErrorInTranscript,
+             quotaErrorCode: r.quotaErrorCode,
+             transcriptDiagnostic: r.transcriptDiagnostic,
              execInvoked: r.execInvoked };
   });
 }
