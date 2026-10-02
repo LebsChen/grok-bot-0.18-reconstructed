@@ -263,11 +263,9 @@ class DesktopBackend:
                     "message": "GROKBOT_LLM_BASE_URL not configured",
                     "code": "UNKNOWN", "error_type": 1}}
                 return
-            model_map = dict(self.model_map)
-            if self.llm_model:
-                model_map.setdefault("", self.llm_model)
             yield from stream_inference(
-                req, self.llm_base_url, self.llm_api_key, model_map)
+                req, self.llm_base_url, self.llm_api_key, self.model_map,
+                default_model=self.llm_model)
 
         @r.unary("aiserver.v1.InferenceService",
                  "RecordAgentFollowupClassification")

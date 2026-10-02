@@ -9,9 +9,11 @@ import http.server
 import io
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import urllib.request
@@ -30,7 +32,7 @@ from devbox_bot.connect import (
     unhandled_methods,
 )
 from devbox_bot.desktop import BOX_PROMPT, DesktopBackend, _pkce_ok
-from devbox_bot.inference import stream_inference
+from devbox_bot.inference import request_to_openai, stream_inference
 
 
 def _b64url(raw: bytes) -> str:
@@ -271,6 +273,109 @@ def test_stream_inference(monkeypatch):
     usage = [f for f in frames
              if f.WhichOneof("response") == "usage"]
     assert usage and usage[0].usage.total_tokens == 5
+
+
+def test_stream_inference_logs_only_safe_request_metadata(monkeypatch, caplog):
+    sse = _FakeSSE([
+        ('data: {"choices":[{"delta":{"content":"private reply"},'
+         '"finish_reason":"stop"}]}'),
+        ('data: {"usage":{"prompt_tokens":1,"completion_tokens":1,'
+         '"total_tokens":2}}'),
+        'data: [DONE]',
+    ])
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: sse)
+    caplog.set_level("INFO", logger="devbox_bot.inference")
+    req = codec_mod.codec().new(
+        "aiserver.v1.InferenceStreamRequest",
+        model_id="unknown-model",
+        messages=[{"role": 1, "text": "private prompt"}])
+
+    list(stream_inference(
+        req, "http://x", "private-key", default_model="kimi-k3"))
+
+    assert "requested=unknown-model upstream=kimi-k3 messages=1 tools=0 " \
+        "body_bytes=" in caplog.text
+    assert ("text_parts=1 thinking_parts=0 tool_calls=0 "
+            "finish_reason=stop usage=y") in caplog.text
+    assert "private prompt" not in caplog.text
+    assert "private reply" not in caplog.text
+    assert "private-key" not in caplog.text
+
+
+def _inference_request(model_id):
+    return codec_mod.codec().new(
+        "aiserver.v1.InferenceStreamRequest",
+        model_id=model_id,
+        messages=[{"role": 1, "text": "hi"}])
+
+
+def test_inference_uses_default_model_for_unknown_id():
+    body = request_to_openai(
+        _inference_request("unknown"), default_model="kimi-k3")
+    assert body["model"] == "kimi-k3"
+
+
+def test_inference_model_map_precedes_default_model():
+    body = request_to_openai(
+        _inference_request("client-model"),
+        {"client-model": "mapped-model"}, default_model="kimi-k3")
+    assert body["model"] == "mapped-model"
+
+
+def test_inference_without_default_preserves_requested_model():
+    body = request_to_openai(_inference_request("requested-model"))
+    assert body["model"] == "requested-model"
+
+
+def test_inference_empty_requested_id_uses_default_model():
+    body = request_to_openai(
+        _inference_request(""), default_model="kimi-k3")
+    assert body["model"] == "kimi-k3"
+
+
+def test_runtime_pack_includes_every_devbox_bot_module(tmp_path):
+    package_dir = Path(__file__).resolve().parent.parent / "devbox_bot"
+    base = tmp_path / "base.tar.gz"
+    output = tmp_path / "runtime.tar.gz"
+    second_output = tmp_path / "runtime-second.tar.gz"
+    with tarfile.open(base, "w:gz") as archive:
+        for name, payload in (
+                ("MANIFEST.json", b"{}"),
+                ("devbox_bot/stale.py", b"stale")):
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+
+    script = package_dir.parent / "tools" / "repack_runtime_pack.py"
+    subprocess.run([
+        sys.executable, str(script), str(base), str(output),
+        "--source", str(package_dir),
+    ], check=True, capture_output=True, text=True)
+    subprocess.run([
+        sys.executable, str(script), str(base), str(second_output),
+        "--source", str(package_dir),
+    ], check=True, capture_output=True, text=True)
+    assert hashlib.sha256(output.read_bytes()).digest() == \
+        hashlib.sha256(second_output.read_bytes()).digest()
+
+    source_files = {
+        f"devbox_bot/{path.relative_to(package_dir).as_posix()}":
+            hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in package_dir.rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts
+        and path.suffix != ".pyc"
+    }
+    with tarfile.open(output, "r:gz") as archive:
+        packed = {
+            member.name.removeprefix("./"):
+                hashlib.sha256(archive.extractfile(member).read()).hexdigest()
+            for member in archive.getmembers()
+            if member.isfile() and
+            member.name.removeprefix("./").startswith("devbox_bot/")
+        }
+        assert "devbox_bot/stale.py" not in packed
+        assert packed == source_files
 
 
 # ── EnsureSandBox against a fake DevBox API ─────────────────────────
@@ -579,7 +684,56 @@ def test_start_box_retries_runtime_downloads_over_http1():
     script = (Path(__file__).resolve().parent.parent / "box" /
               "start-box.sh").read_text()
     assert script.count("--http1.1") == 4
-    assert script.count("--retry-all-errors") == 2
+    assert script.count("--retry-all-errors") == 3
+
+
+def test_start_box_bounds_runtime_downloads_and_retries_size_head():
+    script = (Path(__file__).resolve().parent.parent / "box" /
+              "start-box.sh").read_text()
+    lines = script.splitlines()
+    curl_commands = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if "curl" in line and not line.lstrip().startswith("#"):
+            command = line[line.index("curl"):].strip()
+            while lines[i].rstrip().endswith("\\"):
+                command = (command.rstrip()[:-1].rstrip() + " "
+                           + lines[i + 1].strip())
+                i += 1
+            curl_commands.append(command)
+        i += 1
+
+    downloads = [
+        command for command in curl_commands
+        if "RUNTIME_URL" in command
+        and re.search(r"(?:^|\s)-o(?:\s|$)", command)
+    ]
+    assert len(downloads) == 3
+    assert all("--speed-limit" in command and "--speed-time" in command
+               for command in downloads)
+
+    head = next(command for command in curl_commands
+                if "-fsIL" in command and "RUNTIME_URL" in command)
+    assert "--max-time 20" in head
+    assert "--retry 3" in head
+    assert "--retry-all-errors" in head
+    assert "--retry-delay 2" in head
+
+    fallback = next(command for command in downloads
+                    if '"$PACK"' in command)
+    assert "--speed-limit 5120" in fallback
+    assert "--speed-time 30" in fallback
+    assert "--max-time 600" in fallback
+    assert "--retry 5" in fallback
+    assert "--retry-all-errors" in fallback
+    assert "--retry-delay 2" in fallback
+    assert "-C -" in fallback
+
+    checksum = next(command for command in downloads
+                    if 'RUNTIME_URL.sha256' in command)
+    assert "--speed-limit 1" in checksum
+    assert "--speed-time 20" in checksum
 
 
 def test_provision_listener_flow_and_second_post_409(tmp_path):

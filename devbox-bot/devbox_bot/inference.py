@@ -80,15 +80,20 @@ def _message_to_openai(msg) -> dict:
     return out
 
 
-def request_to_openai(req, model_map: dict | None = None) -> dict:
+def _requested_model(req) -> str:
+    return req.model_id or (
+        req.requested_model.model_id
+        if req.HasField("requested_model") else "")
+
+
+def request_to_openai(req, model_map: dict | None = None,
+                      default_model: str = "") -> dict:
     """Translate a decoded InferenceStreamRequest into a /chat/completions
     request body."""
     model_map = model_map or {}
-    model = req.model_id or (
-        req.requested_model.model_id
-        if req.HasField("requested_model") else "")
+    model = _requested_model(req)
     body = {
-        "model": model_map.get(model, model),
+        "model": model_map.get(model) or default_model or model,
         "messages": [_message_to_openai(m) for m in req.messages],
         "stream": True,
         "stream_options": {"include_usage": True},
@@ -133,7 +138,8 @@ def _error_frame(message: str, status: int | None = None) -> dict:
 
 def stream_inference(req, base_url: str, api_key: str,
                      model_map: dict | None = None,
-                     timeout: float = 120.0):
+                     timeout: float = 120.0,
+                     default_model: str = ""):
     """Yield InferenceStreamResponse messages for one request."""
     out_type = "aiserver.v1.InferenceStreamResponse"
 
@@ -143,83 +149,115 @@ def stream_inference(req, base_url: str, api_key: str,
     invocation = req.invocation_id or f"inv-{secrets.token_hex(8)}"
     yield frame(invocation_id={"invocation_id": invocation})
     try:
-        log.debug("inference req: %s",
-                  str(req).replace("\n", " ")[:800])
-        body = request_to_openai(req, model_map)
+        requested_model = _requested_model(req)
+        body = request_to_openai(req, model_map, default_model)
     except Exception as exc:  # noqa: BLE001 — any field may fail
         yield frame(error={
             "message": f"request translation failed: {exc}",
             "code": "UNKNOWN", "error_type": 1})
         return
-    log.debug("inference upstream body: %s", json.dumps(body)[:600])
+    payload = json.dumps(body).encode("utf-8")
+    log.info(
+        "inference request: requested=%s upstream=%s messages=%d "
+        "tools=%d body_bytes=%d",
+        requested_model or "<empty>", body["model"] or "<empty>",
+        len(body["messages"]), len(body.get("tools") or []), len(payload))
     http_req = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
-        data=json.dumps(body).encode(),
+        data=payload,
         headers={"content-type": "application/json",
                  "authorization": f"Bearer {api_key}",
                  "accept": "text/event-stream"},
         method="POST")
+    text_parts = 0
+    thinking_parts = 0
+    tool_state: dict[int, dict] = {}
+    finish_reason: str | None = None
+    has_usage = False
+
+    def log_stream_end():
+        log.info(
+            "inference stream ended: text_parts=%d thinking_parts=%d "
+            "tool_calls=%d finish_reason=%s usage=%s",
+            text_parts, thinking_parts, len(tool_state),
+            finish_reason or "none", "y" if has_usage else "n")
+
     try:
         resp = urllib.request.urlopen(http_req, timeout=timeout)
     except urllib.error.HTTPError as exc:
         text = exc.read().decode("utf-8", "replace")[:400]
+        log.warning("upstream %d: %s", exc.code, text[:300])
         yield frame(
             **_error_frame(f"upstream {exc.code}: {text}"[:400],
                            exc.code))
+        log_stream_end()
         return
     except Exception as exc:  # noqa: BLE001 — DNS/TLS/socket
+        log.warning("upstream unreachable: %s", exc)
         yield frame(error={
             "message": f"upstream unreachable: {exc}",
             "code": "OVERLOADED", "error_type": 7})
+        log_stream_end()
         return
 
-    tool_state: dict[int, dict] = {}
-    with resp:
-        for raw in resp:
-            line = raw.decode("utf-8", "replace").strip()
-            if not line.startswith("data:"):
-                continue
-            payload = line[5:].strip()
-            if payload == "[DONE]":
-                break
-            try:
-                event = json.loads(payload)
-            except ValueError:
-                continue
-            usage = event.get("usage")
-            if usage:
-                yield frame(usage={
-                    "prompt_tokens": usage.get("prompt_tokens", 0),
-                    "completion_tokens":
-                        usage.get("completion_tokens", 0),
-                    "total_tokens": usage.get("total_tokens", 0)})
-            for choice in event.get("choices") or []:
-                delta = choice.get("delta") or {}
-                if delta.get("reasoning_content"):
-                    yield frame(thinking_part={
-                        "text": delta["reasoning_content"]})
-                if delta.get("content"):
-                    yield frame(text_part={"text": delta["content"]})
-                for tc in delta.get("tool_calls") or []:
-                    idx = tc.get("index", 0)
-                    state = tool_state.setdefault(
-                        idx, {"id": "", "name": ""})
-                    if tc.get("id"):
-                        state["id"] = tc["id"]
-                    fn = tc.get("function") or {}
-                    if fn.get("name"):
-                        state["name"] = fn["name"]
-                    if fn.get("arguments"):
-                        yield frame(tool_call_part={
-                            "tool_call_id": state["id"],
-                            "tool_name": state["name"],
-                            "args": fn["arguments"],
-                            "tool_index": idx})
-                if choice.get("finish_reason"):
-                    for idx, state in tool_state.items():
-                        yield frame(tool_call_part={
-                            "tool_call_id": state["id"],
-                            "tool_name": state["name"],
-                            "is_complete": True,
-                            "tool_index": idx})
-                    yield frame(text_part={"is_final": True})
+    try:
+        with resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                event_payload = line[5:].strip()
+                if event_payload == "[DONE]":
+                    break
+                try:
+                    event = json.loads(event_payload)
+                except ValueError:
+                    continue
+                usage = event.get("usage")
+                if usage:
+                    has_usage = True
+                    yield frame(usage={
+                        "prompt_tokens": usage.get("prompt_tokens", 0),
+                        "completion_tokens":
+                            usage.get("completion_tokens", 0),
+                        "total_tokens": usage.get("total_tokens", 0)})
+                for choice in event.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    if delta.get("reasoning_content"):
+                        thinking_parts += 1
+                        yield frame(thinking_part={
+                            "text": delta["reasoning_content"]})
+                    if delta.get("content"):
+                        text_parts += 1
+                        yield frame(text_part={"text": delta["content"]})
+                    for tc in delta.get("tool_calls") or []:
+                        idx = tc.get("index", 0)
+                        state = tool_state.setdefault(
+                            idx, {"id": "", "name": ""})
+                        if tc.get("id"):
+                            state["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            state["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            yield frame(tool_call_part={
+                                "tool_call_id": state["id"],
+                                "tool_name": state["name"],
+                                "args": fn["arguments"],
+                                "tool_index": idx})
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
+                        for idx, state in tool_state.items():
+                            yield frame(tool_call_part={
+                                "tool_call_id": state["id"],
+                                "tool_name": state["name"],
+                                "is_complete": True,
+                                "tool_index": idx})
+                        yield frame(text_part={"is_final": True})
+    except Exception as exc:  # noqa: BLE001 — stream read failure
+        log.warning("upstream unreachable: %s", exc)
+        yield frame(error={
+            "message": f"upstream unreachable: {exc}",
+            "code": "OVERLOADED", "error_type": 7})
+    finally:
+        log_stream_end()

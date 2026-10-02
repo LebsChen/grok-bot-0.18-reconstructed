@@ -73,9 +73,10 @@ if [ ! -f "$MARKER" ]; then
          "no plugin-assets origin)" >&2
     exit 1
   fi
-  # Guest egress to public hosts is slow single-stream (~40KB/s); pull
-  # the pack as parallel byte-range chunks.  Re-runs resume per part.
-  SIZE="$(curl --http1.1 -fsIL --connect-timeout 15 --max-time 30 "${AUTH[@]}" \
+  # Pull the pack in parallel chunks when size is available; bounded
+  # low-speed retries recover from wedged connections.
+  SIZE="$(curl --http1.1 -fsIL --connect-timeout 15 --max-time 20 \
+      --retry 3 --retry-all-errors --retry-delay 2 "${AUTH[@]}" \
       "$RUNTIME_URL" | awk 'BEGIN{IGNORECASE=1} /^content-length:/ {n=$2} END{gsub(/\r/,"",n); print n}')"
   if [ -n "$SIZE" ] && [ "$SIZE" -gt 1048576 ] 2>/dev/null; then
     N=8; PART=$(( (SIZE + N - 1) / N )); pids=()
@@ -97,12 +98,14 @@ if [ ! -f "$MARKER" ]; then
     wait "${pids[@]}"
     cat "$GB_HOME"/.part-* > "$PACK" && rm -f "$GB_HOME"/.part-*
   else
-    curl --http1.1 -fL --connect-timeout 15 --max-time 1200 \
-      --retry 3 --retry-all-errors \
+    curl --http1.1 -fL --connect-timeout 15 --max-time 600 \
+      --speed-limit 5120 --speed-time 30 \
+      --retry 5 --retry-all-errors --retry-delay 2 \
       -C - "${AUTH[@]}" -o "$PACK" "$RUNTIME_URL"
   fi
   curl --http1.1 -fL --connect-timeout 15 --max-time 60 \
-    --retry 3 --retry-all-errors \
+    --retry 3 --retry-all-errors --retry-delay 2 \
+    --speed-limit 1 --speed-time 20 \
     "${AUTH[@]}" -o "$PACK.sha256" "$RUNTIME_URL.sha256"
   (cd "$GB_HOME" && sha256sum -c "$PACK_NAME.sha256")
   echo "start-box: phase=extract"
