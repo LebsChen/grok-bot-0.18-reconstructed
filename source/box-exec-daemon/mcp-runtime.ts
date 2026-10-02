@@ -52,15 +52,15 @@ interface McpServerState {
   readonly signature: string;
   readonly config: McpServerConfig;
   status: "loading" | "connected" | "error";
-  errorMessage?: string;
-  instructions?: string;
+  errorMessage: string | undefined;
+  instructions: string | undefined;
   capabilities: JsonRecord;
   tools: JsonRecord[];
-  child?: ChildProcessWithoutNullStreams;
-  lines?: ReadlineInterface;
+  child: ChildProcessWithoutNullStreams | undefined;
+  lines: ReadlineInterface | undefined;
   pending: Map<number, PendingRequest>;
   nextRequestId: number;
-  startPromise?: Promise<void>;
+  startPromise: Promise<void> | undefined;
   stopped: boolean;
   stderr: string;
 }
@@ -138,10 +138,15 @@ export class McpServerRuntime {
         signature: entry.signature,
         config: entry.config,
         status: "loading",
+        errorMessage: undefined,
+        instructions: undefined,
         capabilities: {},
         tools: [],
+        child: undefined,
+        lines: undefined,
         pending: new Map(),
         nextRequestId: 1,
+        startPromise: undefined,
         stopped: false,
         stderr: "",
       });

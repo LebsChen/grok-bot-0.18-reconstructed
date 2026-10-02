@@ -811,7 +811,7 @@ const cases = [
     run: async (ctx) => {
       const a = requireAgent(ctx, "a");
       expectOk(await call(ctx, "ensureForeverBox", { id: a.id }), "ensureForeverBox");
-      const body = expectOk(await call(ctx, "getForeverBoxStatus", {}), "getForeverBoxStatus");
+      const body = expectOk(await call(ctx, "getForeverBoxStatus", { id: a.id }), "getForeverBoxStatus");
       if (body?.state !== "running" || typeof body?.vncUrl !== "string" || body.vncUrl.length === 0) {
         throw new Error(`box status did not report running with a VNC URL: ${JSON.stringify({
           state: body?.state,
@@ -872,12 +872,20 @@ const cases = [
       const created = expectOk(await call(ctx, "createRoomFromAgent", { agentId: a.id }), "createRoomFromAgent");
       const roomId = created?.roomId;
       if (typeof roomId !== "string") throw new Error("createRoomFromAgent returned no roomId");
+      if (typeof created?.shareUrl !== "string" || created.shareUrl.length === 0) {
+        throw new Error("createRoomFromAgent returned no shareUrl");
+      }
       ctx.createdRooms.add(roomId);
+      const state = expectOk(await call(ctx, "getSharingState"), "getSharingState after create");
+      const rooms = Array.isArray(state?.rooms) ? state.rooms : [];
+      if (!rooms.some((room) => room?.roomId === roomId)) {
+        throw new Error("getSharingState did not include the created room");
+      }
       const invite = expectOk(await call(ctx, "createRoomInvite", { roomId }), "createRoomInvite");
       if (invite?.status !== "ok" || typeof invite.shareUrl !== "string") {
         throw new Error("createRoomInvite did not return an invite URL");
       }
-      return { roomId, inviteReturned: true, inviteUrlPresent: true };
+      return { roomId, shareUrlPresent: true, roomVisibleInState: true, inviteReturned: true, inviteUrlPresent: true };
     },
   },
   {

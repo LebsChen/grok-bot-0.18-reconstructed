@@ -184,6 +184,17 @@ test("readMcpResourceExecArgs returns resource content and writes an optional do
   });
 });
 
+test("computerUseArgs returns the proto error result when UI control is unavailable", async () => {
+  await withRuntime(async ({ runtime }) => {
+    const response = await execute(runtime, "computerUseArgs", { actions: [] });
+    assert.equal(response.case, "computerUseResult");
+    assert.equal(response.value.result.case, "error");
+    assert.equal(response.value.result.value.error, "Computer use is not available in this runtime.");
+    assert.equal(response.value.result.value.actionCount, 0);
+    assert.equal(response.value.result.value.durationMs, 0);
+  });
+});
+
 test("unsupported ExecServerMessage logging excludes request payloads", async () => {
   await withRuntime(async ({ runtime }) => {
     const chunks = [];

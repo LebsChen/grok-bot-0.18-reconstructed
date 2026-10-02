@@ -37,6 +37,10 @@ import {
   type WriteShellStdinArgs,
 } from "../packages/proto/generated/agent/v1/background_shell_exec_pb.js";
 import {
+  ComputerUseError,
+  ComputerUseResult,
+} from "../packages/proto/generated/agent/v1/computer_use_tool_pb.js";
+import {
   ReadError,
   ReadFileNotFound,
   ReadInvalidFile,
@@ -267,6 +271,19 @@ export class BoxExecRuntime {
           break;
         case "readMcpResourceExecArgs":
           yield client(request.id, request.execId, { case: "readMcpResourceExecResult", value: await this.#mcp.readResource(request.message.value) });
+          break;
+        case "computerUseArgs":
+          yield client(request.id, request.execId, {
+            case: "computerUseResult",
+            value: new ComputerUseResult({
+              result: {
+                case: "error",
+                value: new ComputerUseError({
+                  error: "Computer use is not available in this runtime.",
+                }),
+              },
+            }),
+          });
           break;
         default: {
           const unsupportedCase = request.message.case ?? "unset";
