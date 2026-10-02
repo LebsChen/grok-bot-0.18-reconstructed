@@ -168,30 +168,26 @@ function findSecretRequest(value) {
   return undefined;
 }
 
-function findUserMarkerTimestamp(value, marker) {
+function findAssistantMarkerTimestamp(value, marker, inheritedTimestamp) {
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findUserMarkerTimestamp(item, marker);
+      const found = findAssistantMarkerTimestamp(item, marker, inheritedTimestamp);
       if (found != null) return found;
     }
     return undefined;
   }
   if (!isObject(value)) return undefined;
-  const role = String(value.role ?? value.speaker ?? "").toLowerCase();
-  if (role === "user" &&
-      typeof value.content === "string" &&
-      value.content.includes(marker)) {
-    return timestampOf(value);
-  }
+  const currentTimestamp = timestampOf(value) ?? inheritedTimestamp;
   for (const child of Object.values(value)) {
-    const found = findUserMarkerTimestamp(child, marker);
+    const found = findAssistantMarkerTimestamp(child, marker, currentTimestamp);
     if (found != null) return found;
   }
+  if (collectAssistantText(value).some((text) => text.includes(marker))) return currentTimestamp;
   return undefined;
 }
 
 function sensitiveKey(key) {
-  return /authorization|cookie|password|secret|token|credential|api[-_]?key|bytesbase64|dataurl|shareurl|inviteurl|refresh|access/i.test(key);
+  return /authorization|cookie|password|secret|token|credential|api[-_]?key|bytesbase64|dataurl|shareurl|inviteurl|vncurl|refresh|access/i.test(key);
 }
 
 function sanitizeString(value, literals) {
@@ -624,7 +620,7 @@ const cases = [
       const silentWindowStartedAtMs = Date.now();
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 150_000));
       const transcript = await getTranscript(ctx, a.id);
-      const startedAtMs = findUserMarkerTimestamp(transcript, marker);
+      const startedAtMs = findAssistantMarkerTimestamp(transcript, marker);
       if (startedAtMs == null ||
           startedAtMs < silentWindowStartedAtMs ||
           startedAtMs > Date.now()) {
@@ -656,11 +652,31 @@ const cases = [
       if (typeof path !== "string") throw new Error("uploadAttachment returned no path");
       const read = expectOk(await call(ctx, "readAttachmentText", { path, agentId: a.id }), "readAttachmentText");
       if (!hasMarker(read, marker)) throw new Error("readAttachmentText did not return uploaded text");
-      const response = await sendAndWait(ctx, a.id, "What word is in the attached file? reply with only it", marker, {
-        attachmentPaths: [path],
-        attachmentNames: [filename],
-      });
-      return { path, attachmentTextMatched: true, transcriptMatched: Boolean(response.transcript) };
+      let computerBootingObserved = false;
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          const response = await sendAndWait(ctx, a.id, "What word is in the attached file? reply with only it", marker, {
+            attachmentPaths: [path],
+            attachmentNames: [filename],
+          });
+          computerBootingObserved ||= /computer(?:\s+is)?\s+booting/i.test(collectAssistantText(response.transcript).join("\n"));
+          return {
+            path,
+            attachmentTextMatched: true,
+            transcriptMatched: Boolean(response.transcript),
+            attempts: attempt,
+            computerBootingObserved,
+          };
+        } catch (error) {
+          if (!/getAgentTranscript did not satisfy/.test(error?.message ?? "")) throw error;
+          const transcript = await getTranscript(ctx, a.id).catch(() => undefined);
+          computerBootingObserved ||= /computer(?:\s+is)?\s+booting/i.test(collectAssistantText(transcript).join("\n"));
+          if (attempt === 2) {
+            throw new Error(`${error?.message ?? error}; computerBootingObserved=${computerBootingObserved}; attempts=${attempt}`);
+          }
+        }
+      }
+      throw new Error("attachment transcript polling exhausted its 180-second attempts");
     },
   },
   {
@@ -793,13 +809,17 @@ const cases = [
   {
     id: "box-status",
     run: async (ctx) => {
-      requireReady(ctx);
+      const a = requireAgent(ctx, "a");
+      expectOk(await call(ctx, "ensureForeverBox", { id: a.id }), "ensureForeverBox");
       const body = expectOk(await call(ctx, "getForeverBoxStatus", {}), "getForeverBoxStatus");
-      const text = JSON.stringify(body ?? "").toLowerCase();
-      if (!/(ready|healthy|running)/.test(text) || /(unhealthy|failed|error)/.test(text)) {
-        throw new Error(`box status did not report ready/healthy: ${text.slice(0, 240)}`);
+      if (body?.state !== "running" || typeof body?.vncUrl !== "string" || body.vncUrl.length === 0) {
+        throw new Error(`box status did not report running with a VNC URL: ${JSON.stringify({
+          state: body?.state,
+          hasVncUrl: typeof body?.vncUrl === "string" && body.vncUrl.length > 0,
+          diskPressure: body?.diskPressure,
+        })}`);
       }
-      return { readyOrHealthy: true, status: body };
+      return { ready: true, diskPressure: body.diskPressure, status: body };
     },
   },
   {

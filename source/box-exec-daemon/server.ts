@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { constants } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { appendFile, lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { appendFile, lstat, mkdir, open, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -14,6 +15,7 @@ import {
   LoadMcpServersResponse,
   PingResponse,
   UpdateEnvironmentVariablesResponse,
+  type LoadMcpServersRequest,
   type UpdateEnvironmentVariablesRequest,
 } from "../packages/proto/generated/agent/v1/control_service_pb.js";
 import {
@@ -57,6 +59,7 @@ import {
   ShellTimeout,
   type ShellArgs,
 } from "../packages/proto/generated/agent/v1/shell_exec_pb.js";
+import { McpServerRuntime } from "./mcp-runtime.js";
 
 // Recovered generated descriptors predate `satisfies ServiceType` and therefore
 // widen MethodKind during TypeScript reconstruction. Re-declaring only the
@@ -164,14 +167,20 @@ function thrown(id: number, error: unknown, errorCode = "BOX_EXEC_DAEMON_ERROR")
   });
 }
 
-class BoxExecRuntime {
+export class BoxExecRuntime {
   readonly #environment: NodeJS.ProcessEnv;
   readonly #foreground = new Set<ChildProcessWithoutNullStreams>();
   readonly #background = new Map<number, BackgroundProcess>();
+  readonly #mcp: McpServerRuntime;
   #nextShellId = 1;
 
   constructor(readonly workspaceRoot: string, readonly terminalsDirectory: string, environment: NodeJS.ProcessEnv) {
     this.#environment = { ...environment };
+    this.#mcp = new McpServerRuntime(
+      () => this.#environment,
+      workspaceRoot,
+      (downloadPath, data) => this.writeMcpResourceDownload(downloadPath, data),
+    );
   }
 
   applyEnvironment(request: UpdateEnvironmentVariablesRequest): { applied: number; removed: number } {
@@ -186,6 +195,11 @@ class BoxExecRuntime {
     }
     for (const [key, value] of Object.entries(request.env)) this.#environment[key] = value;
     return { applied: Object.keys(request.env).length, removed };
+  }
+
+  async loadMcpServers(request: LoadMcpServersRequest): Promise<LoadMcpServersResponse> {
+    const loadedServerNames = await this.#mcp.loadServers(request.mcpConfigJson, request.removeMissing);
+    return new LoadMcpServersResponse({ loadedServerNames });
   }
 
   resolvePath(requested: string): string {
@@ -242,8 +256,23 @@ class BoxExecRuntime {
         case "writeShellStdinArgs":
           yield client(request.id, request.execId, { case: "writeShellStdinResult", value: await this.writeStdin(request.message.value) });
           break;
-        default:
-          yield thrown(request.id, `Unsupported ExecServerMessage case: ${request.message.case ?? "unset"}`, "BOX_EXEC_UNSUPPORTED");
+        case "mcpArgs":
+          yield client(request.id, request.execId, { case: "mcpResult", value: await this.#mcp.executeTool(request.message.value) });
+          break;
+        case "mcpStateExecArgs":
+          yield client(request.id, request.execId, { case: "mcpStateExecResult", value: await this.#mcp.state(request.message.value) });
+          break;
+        case "listMcpResourcesExecArgs":
+          yield client(request.id, request.execId, { case: "listMcpResourcesExecResult", value: await this.#mcp.listResources(request.message.value.server) });
+          break;
+        case "readMcpResourceExecArgs":
+          yield client(request.id, request.execId, { case: "readMcpResourceExecResult", value: await this.#mcp.readResource(request.message.value) });
+          break;
+        default: {
+          const unsupportedCase = request.message.case ?? "unset";
+          process.stderr.write(`${JSON.stringify({ case: unsupportedCase, requestId: request.id })}\n`);
+          yield thrown(request.id, `Unsupported ExecServerMessage case: ${unsupportedCase}`, "BOX_EXEC_UNSUPPORTED");
+        }
       }
     } catch (error) {
       yield thrown(request.id, error);
@@ -403,6 +432,29 @@ class BoxExecRuntime {
     for (const process of this.#background.values()) this.kill(process.child);
     this.#foreground.clear();
     this.#background.clear();
+    await this.#mcp.stop();
+  }
+
+  private async writeMcpResourceDownload(requested: string, data: Uint8Array): Promise<void> {
+    const target = this.resolvePath(requested);
+    const parent = await realpath(path.dirname(target));
+    this.assertRealPathAllowed(parent, requested);
+    try {
+      const existing = await lstat(target);
+      if (existing.isSymbolicLink() || existing.nlink > 1) {
+        throw new PathRejectedError(`Resource download target is a symbolic link or hard link: ${requested}`);
+      }
+    } catch (error) {
+      const code = typeof error === "object" && error != null && "code" in error ? String(error.code) : undefined;
+      if (code !== "ENOENT") throw error;
+    }
+    const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0);
+    const file = await open(target, flags, 0o600);
+    try {
+      await file.writeFile(data);
+    } finally {
+      await file.close();
+    }
   }
 
   private spawnShell(command: string, cwd: string): ChildProcessWithoutNullStreams {
@@ -469,7 +521,7 @@ export async function startBoxExecDaemon(options: BoxExecDaemonOptions): Promise
         ping: async () => new PingResponse(),
         getCapabilities: async () => new GetCapabilitiesResponse({ computerUseSupported: false, installPluginArtifactSupported: false }),
         updateEnvironmentVariables: async request => new UpdateEnvironmentVariablesResponse(runtime.applyEnvironment(request)),
-        loadMcpServers: async () => new LoadMcpServersResponse(),
+        loadMcpServers: async request => runtime.loadMcpServers(request),
       });
       router.service(BoxExecService, { exec: (request, context) => runtime.execute(request, context.signal) });
     },
