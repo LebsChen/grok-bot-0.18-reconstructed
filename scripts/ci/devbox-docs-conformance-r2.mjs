@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -17,9 +17,19 @@ const API_KEY = process.env.DEVBOX_API_KEY ?? "";
 const CONTROL_PLANE_ORIGIN = process.env.DEVBOX_CONTROL_PLANE_ORIGIN ??
   "http://127.0.0.1:8000";
 const ORGANIZATION_ID = "org-5cc24fac78f946c4bef43e452af89f0e";
-const OUT = resolve(process.argv.includes("--out")
-  ? process.argv[process.argv.indexOf("--out") + 1]
-  : process.argv[2] ?? "devbox-docs-conformance-r2");
+function argumentValue(flag) {
+  const index = process.argv.indexOf(flag);
+  if (index < 0) return undefined;
+  const value = process.argv[index + 1];
+  if (value == null || value.startsWith("--") ||
+      (flag === "--cases" && value.trim() === "")) {
+    throw new Error(`${flag} requires a value`);
+  }
+  return value;
+}
+const OUT = resolve(argumentValue("--out") ??
+  process.argv[2] ?? "devbox-docs-conformance-r2");
+const CASE_FILTER = argumentValue("--cases");
 const EXPECTED_BOX_PREFIX = "a8dce654";
 const RUN_SUFFIX = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 const TIMEOUT_MS = 180_000;
@@ -158,11 +168,32 @@ function recordSetup(ctx, name, startedAtMs, response = {}) {
   });
 }
 
+function responseHeadersProjection(response) {
+  return Object.fromEntries(
+    ["server", "cf-ray", "cf-cache-status", "via", "content-type", "date"]
+      .map((name) => [name, response.headers.get(name)])
+      .filter(([, value]) => value != null),
+  );
+}
+
 async function call(ctx, command, body = {}, { record = true } = {}) {
   const startedAtMs = Date.now();
   let status = 0;
   let parsed = null;
+  let rawText = "";
   let error;
+  let hop = {
+    method: "POST",
+    path: `/api/${command}`,
+  };
+  try {
+    const requestUrl = new URL(`/api/${command}`, ctx.gateway.base);
+    hop = {
+      method: "POST",
+      origin: requestUrl.origin,
+      path: requestUrl.pathname,
+    };
+  } catch {}
   try {
     const response = await gatewayRequest(
       ctx.gateway,
@@ -171,7 +202,22 @@ async function call(ctx, command, body = {}, { record = true } = {}) {
       { bearer: ctx.gateway.token, body },
     );
     status = response.status;
-    parsed = parseText(await response.text());
+    rawText = await response.text();
+    parsed = parseText(rawText);
+    let responseUrl = null;
+    try {
+      const parsedResponseUrl = new URL(response.url);
+      responseUrl = {
+        origin: parsedResponseUrl.origin,
+        path: parsedResponseUrl.pathname,
+      };
+    } catch {}
+    hop = {
+      ...hop,
+      status,
+      ...(responseUrl == null ? {} : { responseUrl }),
+      headers: responseHeadersProjection(response),
+    };
   } catch (caught) {
     error = String(caught?.message ?? caught);
   }
@@ -182,9 +228,11 @@ async function call(ctx, command, body = {}, { record = true } = {}) {
       path: `/api/${command}`,
       body: sanitize(body, ctx.literals),
     },
+    hop: sanitize(hop, ctx.literals),
     response: {
       status,
       body: sanitize(parsed, ctx.literals),
+      ...(status >= 500 ? { rawBody: sanitizeString(rawText, ctx.literals) } : {}),
       ...(error ? { error: sanitizeString(error, ctx.literals) } : {}),
     },
     startedAtMs,
@@ -192,6 +240,10 @@ async function call(ctx, command, body = {}, { record = true } = {}) {
     durationMs: Date.now() - startedAtMs,
   };
   if (record) ctx.caseRecord.calls.push(entry);
+  if (status >= 500 && ctx.caseRecord != null) {
+    ctx.caseRecord.gatewayHops ??= [];
+    ctx.caseRecord.gatewayHops.push(sanitize(hop, ctx.literals));
+  }
   return { status, body: parsed, entry, error };
 }
 
@@ -310,6 +362,185 @@ function automationSpec(name, prompt, isEnabled = false) {
   };
 }
 
+function literalCount(value, literal) {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  if (typeof text !== "string" || literal.length === 0) return 0;
+  let count = 0;
+  let offset = 0;
+  while (true) {
+    const index = text.indexOf(literal, offset);
+    if (index < 0) return count;
+    count += 1;
+    offset = index + literal.length;
+  }
+}
+
+function hashLiteral(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function grepFilesWithStdin(targets, literal) {
+  const paths = Array.isArray(targets) ? targets : [targets];
+  if (paths.length === 0) {
+    return { status: "NOT_COVERED", matchCount: 0, reason: "no files were found" };
+  }
+  try {
+    const output = execFileSync(
+      "grep",
+      ["-rlF", "-f", "-", "--", ...paths],
+      { input: `${literal}\n`, encoding: "utf8", maxBuffer: 2 * 1024 * 1024 },
+    );
+    return {
+      status: "PASS",
+      matchCount: output.split(/\r?\n/).filter(Boolean).length,
+    };
+  } catch (error) {
+    if (error?.status === 1) {
+      return { status: "PASS", matchCount: 0 };
+    }
+    return {
+      status: "NOT_COVERED",
+      matchCount: 0,
+      reason: "host grep could not scan the requested files",
+    };
+  }
+}
+
+function hostDesktopLogPaths() {
+  try {
+    return execFileSync(
+      "find",
+      ["/home/ubuntu/.devbox", "-type", "f", "-name", "*.log", "-print"],
+      { encoding: "utf8", maxBuffer: 2 * 1024 * 1024 },
+    ).split(/\r?\n/).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function pollForNewAutomationRun(
+  ctx,
+  agentId,
+  automationId,
+  knownRunIds,
+  timeoutMs = TIMEOUT_MS,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = await call(ctx, "getAgentAutomations", { id: agentId }, { record: false });
+    if (!last.error && last.status >= 200 && last.status < 300) {
+      const automation = automationById(listBody(last.body), automationId);
+      const newRuns = (automation?.runs ?? [])
+        .filter((run) => typeof run?.id === "string" && !knownRunIds.has(run.id));
+      if (newRuns.length > 0) {
+        ctx.caseRecord.calls.push(last.entry);
+        return { automation, newRuns };
+      }
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, POLL_MS));
+  }
+  if (last) ctx.caseRecord.calls.push(last.entry);
+  return null;
+}
+
+async function pollForAutomationRunCompletion(
+  ctx,
+  agentId,
+  automationId,
+  runId,
+  timeoutMs = TIMEOUT_MS,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = await call(ctx, "getAgentAutomations", { id: agentId }, { record: false });
+    if (!last.error && last.status >= 200 && last.status < 300) {
+      const automation = automationById(listBody(last.body), automationId);
+      const run = automation?.runs?.find((item) => item?.id === runId);
+      if (run != null && run.status !== "running") {
+        ctx.caseRecord.calls.push(last.entry);
+        return { automation, run };
+      }
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, POLL_MS));
+  }
+  if (last) ctx.caseRecord.calls.push(last.entry);
+  return null;
+}
+
+async function triggerAutomationRun(ctx, agentId, automationId, attemptNumber) {
+  const before = automationById(
+    await getAutomations(ctx, agentId, { record: false }),
+    automationId,
+  );
+  const knownRunIds = new Set(
+    (before?.runs ?? []).map((run) => run?.id).filter(Boolean),
+  );
+  const attempts = [];
+  let response = await call(ctx, "runAgentAutomationNow", {
+    id: agentId,
+    automationId,
+  });
+  attempts.push({
+    attempt: 1,
+    status: response.status,
+    error: response.error ?? null,
+    hop: response.entry.hop,
+  });
+  let observed = await pollForNewAutomationRun(
+    ctx,
+    agentId,
+    automationId,
+    knownRunIds,
+  );
+  if (response.status >= 500 && observed == null) {
+    response = await call(ctx, "runAgentAutomationNow", {
+      id: agentId,
+      automationId,
+    });
+    attempts.push({
+      attempt: 2,
+      status: response.status,
+      error: response.error ?? null,
+      hop: response.entry.hop,
+    });
+    if (response.error || response.status < 200 || (response.status >= 300 && response.status < 500)) {
+      expectOk(response, `runAgentAutomationNow retry ${attemptNumber}`);
+    }
+    observed = await pollForNewAutomationRun(
+      ctx,
+      agentId,
+      automationId,
+      knownRunIds,
+    );
+  } else if (response.error || response.status < 200 || response.status >= 300) {
+    expectOk(response, `runAgentAutomationNow ${attemptNumber}`);
+  }
+  if (observed == null || observed.newRuns.length !== 1) {
+    throw new Error(
+      `manual run ${attemptNumber} observed ${observed?.newRuns?.length ?? 0} new runs`,
+    );
+  }
+  const run = observed.newRuns[0];
+  let completed = run.status === "running"
+    ? await pollForAutomationRunCompletion(
+      ctx,
+      agentId,
+      automationId,
+      run.id,
+    )
+    : { automation: observed.automation, run };
+  if (completed == null) {
+    throw new Error(`manual run ${attemptNumber} did not finish`);
+  }
+  return {
+    run: completed.run,
+    attempts,
+    observedRunId: run.id,
+  };
+}
+
 function appendNotCovered(ctx, subcheck, search, findings) {
   ctx.caseRecord.notCovered ??= [];
   ctx.caseRecord.notCovered.push({
@@ -370,6 +601,38 @@ function guestExec(ctx, command, timeoutSec = 120, { record = true } = {}) {
   };
   if (record && ctx.caseRecord) ctx.caseRecord.calls.push(entry);
   return { exitCode, output, entry, error };
+}
+
+function guestLiteralScan(ctx, probePath, targetPath, label) {
+  const matchPath = `/tmp/r2-match-${RUN_SUFFIX}-${label}`;
+  const command = [
+    "set +e",
+    `grep -rlF -f ${shellQuote(probePath)} ${shellQuote(targetPath)} > ${shellQuote(matchPath)} 2>/dev/null`,
+    "grepRc=$?",
+    `matchCount=$(wc -l < ${shellQuote(matchPath)} 2>/dev/null || printf '0')`,
+    `rm -f -- ${shellQuote(matchPath)}`,
+    "printf 'grep_rc=%s count=%s\\n' \"$grepRc\" \"$matchCount\"",
+  ].join("; ");
+  const result = guestExec(ctx, command, 120);
+  const match = result.output.match(/grep_rc=(-?\d+)\s+count=(\d+)/);
+  if (result.exitCode !== 0 || match == null) {
+    return {
+      label,
+      status: "NOT_COVERED",
+      matchCount: 0,
+      reason: "guest grep did not return a count",
+      exitCode: result.exitCode,
+    };
+  }
+  const grepRc = Number(match[1]);
+  const matchCount = Number(match[2]);
+  return {
+    label,
+    status: grepRc === 0 || grepRc === 1 ? "PASS" : "NOT_COVERED",
+    matchCount,
+    grepExitCode: grepRc,
+    ...(grepRc > 1 ? { reason: "guest grep could not scan the requested path" } : {}),
+  };
 }
 
 function parseAvailableBytes(output) {
@@ -827,34 +1090,23 @@ const cases = [
       ctx.createdAutomations.push({ agentId: agent.id, automationId });
 
       const completedRuns = [];
+      const triggerAttempts = [];
       for (let index = 0; index < 22; index += 1) {
-        const before = automationById(await getAutomations(ctx, agent.id, { record: false }), automationId);
-        const priorId = before?.runs?.[0]?.id;
-        expectOk(await call(ctx, "runAgentAutomationNow", {
-          id: agent.id,
-          automationId,
-        }), "runAgentAutomationNow");
-        const result = await waitFor(
+        const trigger = await triggerAutomationRun(
           ctx,
-          "getAgentAutomations",
-          { id: agent.id },
-          (body) => {
-            const current = automationById(listBody(body), automationId);
-            const newest = current?.runs?.[0];
-            return newest?.id != null &&
-              newest.id !== priorId &&
-              newest.status !== "running";
-          },
-          { timeoutMs: TIMEOUT_MS, intervalMs: POLL_MS },
+          agent.id,
+          automationId,
+          index + 1,
         );
-        const latestAutomation = automationById(listBody(result), automationId);
-        const latestRun = latestAutomation?.runs?.[0];
-        if (!latestRun?.id || latestRun.status === "running") {
-          throw new Error(`manual run ${index + 1} did not finish`);
-        }
+        const latestRun = trigger.run;
         if (latestRun.status !== "ok") {
           throw new Error(`manual run ${index + 1} ended with status ${latestRun.status}`);
         }
+        triggerAttempts.push({
+          trigger: index + 1,
+          observedRunId: trigger.observedRunId,
+          attempts: trigger.attempts,
+        });
         completedRuns.push({
           id: latestRun.id,
           status: latestRun.status,
@@ -1004,6 +1256,32 @@ const cases = [
           id: run.id,
           status: run.status,
         })),
+        triggerAttempts,
+        gatewayHopDiagnosis: {
+          requestPath: "/api/runAgentAutomationNow",
+          sourcePath: [
+            "source/host/gateway-server.ts routeCommand",
+            "source/host/gateway-protocol.ts runAgentAutomationNow",
+            "source/host/host-gateway-api.ts GatewayApi.runAgentAutomationNow",
+            "source/host/extensions/transcript/automation-runtime.ts",
+            "source/host/extensions/transcript/automation-run-path.ts",
+          ],
+          gatewayServerErrorStatuses: {
+            commandError: "HTTP 500 (or 409 for the documented command errors)",
+            success: "HTTP 200",
+            observedFiveXX: triggerAttempts
+              .flatMap((item) => item.attempts)
+              .filter((item) => item.status >= 500)
+              .map((item) => ({
+                status: item.status,
+                hop: item.hop,
+              })),
+          },
+        finding: triggerAttempts.some((item) =>
+          item.attempts.some((attempt) => attempt.status >= 500))
+          ? "A 5xx response was recorded at the gateway HTTP hop with its response metadata; the gateway source path maps command exceptions to 500 and does not generate HTTP 524."
+          : "No 5xx was observed during this run. The gateway source path maps command exceptions to 500 (or documented errors to 409) and success to 200; the exact source of any earlier HTTP 524 remains undetermined without a reproduced 5xx hop.",
+        },
         pauseReadBack: true,
         resumeReadBack: true,
         editReadBack: true,
@@ -1196,30 +1474,233 @@ const cases = [
         ctx,
         "save/list Bot secrets with name, description, and masked value",
         "Searched source/host/gateway-protocol.ts and source/host/host-gateway-api.ts for listSecrets/upsertSecrets/removeSecrets; searched source/electron-main/secrets/secrets-ipc.ts and source/shared/rpc/main.ts for their IPC contracts.",
-        "The gateway exposes only setBoxSecrets({secrets: Record<string,string>}) and getBoxSecretsStatus() (keys, applied state, timestamp). listSecrets/upsertSecrets/removeSecrets exist only in local Electron IPC; listSecrets returns keys and persistence state, upsertSecrets accepts key/value entries without descriptions. No supported gateway route for those IPC methods was found.",
-      );
-      appendNotCovered(
-        ctx,
-        "inject R2_PROBE and scan transcript, guest files/logs, host logs, and evidence",
-        "Searched source/host/extensions/secrets/secrets-service.ts and source/host/host-gateway-api.ts for box-secret mutation semantics.",
-        "setBoxSecrets replaces the complete desired secret map and applies it with replace=true. The existing secret values cannot be read back through the gateway, so adding only R2_PROBE could remove existing credentials. No secret was written, no sentinel was generated, and no environment/log scan was claimed.",
+        "The gateway exposes setBoxSecrets({secrets: Record<string,string>}) and getBoxSecretsStatus() (keys, applied state, timestamp). Name+description listing through electron-main listSecrets/upsertSecrets is not covered at gateway level.",
       );
 
-      return {
-        caseStatus: "BLOCKED",
-        subchecks: [
-          { name: "Bot secret save/list/description API", status: "NOT_COVERED" },
-          { name: "R2_PROBE environment injection and masking scans", status: "NOT_COVERED" },
-        ],
-        boxSecretStatus: {
-          status: statusResponse.status,
-          keyCount: keys.length,
-          hasR2Probe: keys.includes("R2_PROBE"),
-          isApplied: status?.isApplied ?? null,
-        },
-        sentinelGenerated: false,
-        writesPerformed: false,
-      };
+      if (keys.length > 0) {
+        return {
+          caseStatus: "BLOCKED",
+          subchecks: [
+            { name: "Bot secret save/list/description API", status: "NOT_COVERED" },
+            { name: "R2_PROBE environment injection and masking scans", status: "BLOCKED" },
+          ],
+          boxSecretStatus: {
+            status: statusResponse.status,
+            keys,
+            keyCount: keys.length,
+            hasR2Probe: keys.includes("R2_PROBE"),
+            isApplied: status?.isApplied ?? null,
+          },
+          sentinelGenerated: false,
+          writesPerformed: false,
+          blockedReason: "getBoxSecretsStatus returned a non-empty key set; setBoxSecrets was not called",
+        };
+      }
+
+      const sentinel = randomUUID().replaceAll("-", "");
+      const sentinelHash = hashLiteral(sentinel);
+      ctx.secretSentinel = sentinel;
+      ctx.secretSentinelHash = sentinelHash;
+      ctx.literals.add(sentinel);
+      let secretMutationAttempted = false;
+      let probePath;
+      let clearFailure;
+      try {
+        secretMutationAttempted = true;
+        const setResponse = await call(ctx, "setBoxSecrets", {
+          secrets: { R2_PROBE: sentinel },
+        });
+        expectOk(setResponse, "setBoxSecrets R2_PROBE");
+        const applied = await waitFor(
+          ctx,
+          "getBoxSecretsStatus",
+          {},
+          (body) =>
+            body?.isApplied === true &&
+            Array.isArray(body?.keys) &&
+            body.keys.includes("R2_PROBE"),
+        );
+        const statusText = JSON.stringify(applied);
+        if (statusText.includes(sentinel)) {
+          throw new Error("getBoxSecretsStatus returned the secret value");
+        }
+        if (Object.keys(applied ?? {}).some((key) => /value|secretValue/i.test(key))) {
+          throw new Error("getBoxSecretsStatus returned a secret-value field");
+        }
+
+        const agent = await createAgent(
+          ctx,
+          `SecretProbe-${RUN_SUFFIX}`,
+          "R2 secret masking probe",
+        );
+        const countPrompt = "Run `printenv R2_PROBE | wc -c` in the terminal and reply with only the number.";
+        expectOk(await call(ctx, "sendPrompt", {
+          agentId: agent.id,
+          prompt: countPrompt,
+        }), "sendPrompt R2_PROBE length");
+        const countTranscript = await waitFor(
+          ctx,
+          "getAgentTranscript",
+          { id: agent.id },
+          (body) => collectAssistantText(body).some((text) => /^(?:32|33)$/.test(text.trim())),
+        );
+        const countReplies = collectAssistantText(countTranscript)
+          .map((text) => text.trim())
+          .filter((text) => /^(?:32|33)$/.test(text));
+        const observedByteCount = countReplies.at(-1);
+        if (observedByteCount !== "32" && observedByteCount !== "33") {
+          throw new Error(`R2_PROBE length reply was ${observedByteCount ?? "missing"}, expected 32 or 33`);
+        }
+
+        probePath = `/tmp/r2-secret-${RUN_SUFFIX}.txt`;
+        ctx.temporaryGuestFiles.push(probePath);
+        const fileMarker = `R2FILEOK-${RUN_SUFFIX}`;
+        const writeTranscript = await sendAndWait(
+          ctx,
+          agent.id,
+          `Run exactly this shell command in the terminal: umask 077; printenv R2_PROBE > ${probePath}. Do not print the file contents. Then reply with exactly ${fileMarker}.`,
+          fileMarker,
+        );
+        const probeCheck = guestExec(
+          ctx,
+          `test -s ${shellQuote(probePath)} && printf 'ready\\n'`,
+          60,
+        );
+
+        const findPath = guestExec(
+          ctx,
+          `find /home -type d -path '*/agents/${agent.id}' -print -quit`,
+          90,
+        );
+        const agentDir = findPath.output
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .at(-1);
+        const agentDirValid = findPath.exitCode === 0 &&
+          typeof agentDir === "string" &&
+          agentDir.startsWith("/home/") &&
+          agentDir.endsWith(`/agents/${agent.id}`);
+
+        const guestScans = [];
+        if (probeCheck.exitCode === 0 && probeCheck.output.includes("ready") && agentDirValid) {
+          guestScans.push(guestLiteralScan(ctx, probePath, agentDir, "agent-dir"));
+          guestScans.push(guestLiteralScan(ctx, probePath, "/home/ubuntu/.grok-bot-box/logs", "guest-logs"));
+        } else {
+          guestScans.push({
+            label: "agent-dir",
+            status: "NOT_COVERED",
+            matchCount: 0,
+            reason: "Bot-created guest probe file or source-derived agent directory was not accessible to p23_guest_exec",
+          });
+          guestScans.push({
+            label: "guest-logs",
+            status: "NOT_COVERED",
+            matchCount: 0,
+            reason: "Bot-created guest probe file was not accessible to p23_guest_exec",
+          });
+          appendNotCovered(
+            ctx,
+            "guest file/log masking grep",
+            "Used a Bot terminal command to write R2_PROBE to a mode-0600 guest temp file, then attempted grep -rlF -f through tools/p23_guest_exec.py.",
+            "The probe file or source-derived agent directory was not accessible to the guest exec path.",
+          );
+        }
+
+        const transcriptCount = literalCount(writeTranscript, sentinel) +
+          literalCount(countTranscript, sentinel);
+        const hostLogs = hostDesktopLogPaths();
+        const hostLogScan = grepFilesWithStdin(hostLogs, sentinel);
+        const hostTranscriptScan = {
+          status: "PASS",
+          matchCount: transcriptCount,
+        };
+        const evidenceScan = {
+          status: "DEFERRED",
+          matchCount: null,
+          reason: "final evidence-directory scan runs after all selected case files are written",
+        };
+
+        return {
+          caseStatus: "PASS",
+          subchecks: [
+            { name: "gateway box-secret set/status", status: "PASS" },
+            { name: "Bot secret save/list/description API", status: "NOT_COVERED" },
+            { name: "R2_PROBE terminal byte count", status: "PASS", observedByteCount: Number(observedByteCount) },
+            { name: "transcript response masking", status: hostTranscriptScan.status, matchCount: hostTranscriptScan.matchCount },
+            ...guestScans.map((scan) => ({
+              name: `${scan.label} masking grep`,
+              status: scan.status,
+              matchCount: scan.matchCount,
+            })),
+            { name: "host desktop-backend log masking grep", status: hostLogScan.status, matchCount: hostLogScan.matchCount },
+            { name: "evidence-directory masking grep", status: evidenceScan.status },
+          ],
+          sentinelSha256: sentinelHash,
+          boxSecretStatus: {
+            initialKeys: keys,
+            appliedKeys: applied.keys,
+            isApplied: applied.isApplied,
+            statusContainsValue: false,
+          },
+          bot: {
+            id: agent.id,
+            transcriptEntryCount: listBody(writeTranscript).length,
+            transcriptResponseSentinelCount: hostTranscriptScan.matchCount,
+          },
+          guestProbe: {
+            path: probePath,
+            agentDir: agentDirValid ? agentDir : null,
+            probeFileAccessible: probeCheck.exitCode === 0 && probeCheck.output.includes("ready"),
+            scans: guestScans,
+          },
+          hostDesktopBackendLogs: {
+            root: "/home/ubuntu/.devbox",
+            fileCount: hostLogs.length,
+            scan: hostLogScan,
+          },
+          evidenceDirectoryScan: evidenceScan,
+          writesPerformed: true,
+        };
+      } finally {
+        if (probePath != null) {
+          const removeProbe = guestExec(
+            ctx,
+            `rm -f -- ${shellQuote(probePath)} && if [ -e ${shellQuote(probePath)} ]; then printf 'present\\n'; else printf 'removed\\n'; fi`,
+            60,
+            { record: false },
+          );
+          if (removeProbe.exitCode === 0 && removeProbe.output.includes("removed")) {
+            ctx.temporaryGuestFiles = ctx.temporaryGuestFiles.filter(
+              (path) => path !== probePath,
+            );
+          }
+        }
+        if (secretMutationAttempted) {
+          try {
+            const clearResponse = await call(ctx, "setBoxSecrets", { secrets: {} });
+            expectOk(clearResponse, "setBoxSecrets cleanup");
+            const cleared = await waitFor(
+              ctx,
+              "getBoxSecretsStatus",
+              {},
+              (body) =>
+                body?.isApplied === true &&
+                Array.isArray(body?.keys) &&
+                body.keys.length === 0,
+            );
+            if (cleared.keys.length !== 0) {
+              throw new Error("setBoxSecrets cleanup returned non-empty keys");
+            }
+          } catch (error) {
+            clearFailure = error;
+          }
+        }
+        if (clearFailure != null) {
+          throw clearFailure;
+        }
+      }
+
     },
   },
   {
@@ -1264,11 +1745,20 @@ const cases = [
       if (typeof filePath !== "string" || filePath.length === 0) {
         throw new Error("uploadAttachment returned no path for the search marker file");
       }
-      const fileMarker = `FILEOK-${RUN_SUFFIX}`;
-      await sendAndWait(ctx, a.id, `Read the attached file and reply with exactly ${fileMarker}`, fileMarker, {
+      expectOk(await call(ctx, "sendPrompt", {
+        agentId: a.id,
+        prompt: "Keep this file attached to the conversation.",
         attachmentPaths: [filePath],
         attachmentNames: [fileName],
-      });
+      }), "sendPrompt search file attachment");
+      const attachmentTranscript = await waitFor(
+        ctx,
+        "getAgentTranscript",
+        { id: a.id },
+        (body) => listBody(body).some((entry) =>
+          entry?.kind === "user-attachment" && entry.file_name === fileName),
+        { timeoutMs: TIMEOUT_MS, intervalMs: POLL_MS },
+      );
       const routineName = `Routine-${marker}`;
       const routineCreated = expectOk(await call(ctx, "createAgentAutomation", {
         id: b.id,
@@ -1290,7 +1780,7 @@ const cases = [
         ctx,
         "search file contents rather than attachment names",
         "Searched source/host/extensions/content-search/search-index-db.ts for media_fts and source/host/extensions/content-search/search-index-writer.ts for indexed media fields.",
-        "The media FTS table indexes file_name only. The metadata filename query is exercised separately; searching arbitrary file contents is NOT_COVERED.",
+        "The media FTS table indexes file_name only. The metadata filename query is exercised separately; searching arbitrary file contents is NOT_COVERED. The read-only diagnostics record the guest Node/FTS5 and index state; search availability can vary during rollout, and the guest runtime is not replaced.",
       );
 
       let mediaResults = [];
@@ -1310,13 +1800,61 @@ const cases = [
       const fileNameHit = mediaResults.some((item) =>
         item.agentId === a.id &&
         String(item.fileName ?? "").includes(marker));
+      const runtimeNode = guestExec(
+        ctx,
+        "/home/ubuntu/.grok-bot-box/runtime/node --version",
+        60,
+      );
+      const ftsProbeScript = [
+        "const { DatabaseSync } = require('node:sqlite');",
+        "const db = new DatabaseSync(':memory:');",
+        "try { db.exec('CREATE VIRTUAL TABLE probe USING fts5(content)'); console.log('fts5=available'); }",
+        "catch (error) { console.log('fts5=unavailable:' + String(error?.message ?? error).replace(/\\s+/g, ' ')); }",
+      ].join(" ");
+      const ftsProbe = guestExec(
+        ctx,
+        `/home/ubuntu/.grok-bot-box/runtime/node -e ${shellQuote(ftsProbeScript)}`,
+        60,
+      );
+      const sqliteScript = [
+        "import sqlite3",
+        "db=sqlite3.connect('file:/home/ubuntu/.sand/search-index.db?mode=ro', uri=True)",
+        "print('user_version=' + str(db.execute('PRAGMA user_version').fetchone()[0]))",
+        "tables=[row[0] for row in db.execute(\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name\")]",
+        "print('tables=' + ','.join(tables))",
+      ].join("; ");
+      const indexDb = guestExec(
+        ctx,
+        `python3 -c ${shellQuote(sqliteScript)}`,
+        60,
+      );
+      const diagnosticResult = (result) => ({
+        status: result.exitCode === 0 ? "PASS" : "NOT_COVERED",
+        exitCode: result.exitCode,
+        output: sanitizeString(result.output, ctx.literals),
+        ...(result.entry.response.stderr
+          ? { stderr: result.entry.response.stderr }
+          : {}),
+      });
+      const searchDiagnostics = {
+        guestRuntimeNode: diagnosticResult(runtimeNode),
+        inMemoryFts5: {
+          ...diagnosticResult(ftsProbe),
+          available: ftsProbe.output.includes("fts5=available"),
+        },
+        readOnlyIndexDatabase: diagnosticResult(indexDb),
+      };
+      const diagnosticsStatus = [runtimeNode, ftsProbe, indexDb]
+        .every((result) => result.exitCode === 0)
+        ? "PASS"
+        : "NOT_COVERED";
 
       return {
         caseStatus: fileNameHit ? "PASS" : "FAIL",
         marker,
         botA: a.id,
         botB: b.id,
-        transcriptEntryCount: listBody(transcript).length,
+        transcriptEntryCount: listBody(attachmentTranscript).length,
         messageSearch: { query: marker, hit: messageHit },
         linkSearch: { query: "example.com", hit: linkHit, link },
         fileNameSearch: {
@@ -1341,11 +1879,24 @@ const cases = [
           },
           { name: "attachment file-content search", status: "NOT_COVERED" },
           { name: "routine-name search", status: "NOT_COVERED" },
+          { name: "guest Node/FTS5/index diagnostics", status: diagnosticsStatus },
         ],
+        searchDiagnostics,
       };
     },
   },
 ];
+
+const selectedCases = (() => {
+  if (CASE_FILTER == null || CASE_FILTER.trim() === "") return cases;
+  const requested = CASE_FILTER.split(",").map((value) => value.trim()).filter(Boolean);
+  const definitions = requested.map((id) => cases.find((definition) => definition.id === id));
+  const unknown = requested.filter((id, index) => definitions[index] == null);
+  if (unknown.length > 0) {
+    throw new Error(`unknown --cases value(s): ${unknown.join(", ")}`);
+  }
+  return definitions;
+})();
 
 async function runCase(ctx, definition) {
   const startedAtMs = Date.now();
@@ -1367,6 +1918,9 @@ async function runCase(ctx, definition) {
   }
   caseRecord.endedAtMs = Date.now();
   caseRecord.durationMs = caseRecord.endedAtMs - startedAtMs;
+  if (definition.id === "secret-masking" && ctx.secretSentinelHash != null) {
+    caseRecord.sentinelSha256 = ctx.secretSentinelHash;
+  }
   await writeFile(
     resolve(OUT, `${definition.id}.json`),
     JSON.stringify(sanitize(caseRecord, ctx.literals), null, 2),
@@ -1474,6 +2028,10 @@ const ctx = {
   agentInventoryAfter: [],
   agentInventoryDelta: null,
   agentInventoryBeforeCaptured: false,
+  secretSentinel: null,
+  secretSentinelHash: null,
+  secretEvidenceScan: null,
+  secretEvidenceScanFinal: null,
 };
 
 try {
@@ -1559,7 +2117,7 @@ try {
 
 const results = [];
 try {
-  for (const definition of cases) {
+  for (const definition of selectedCases) {
     results.push(await runCase(ctx, definition));
   }
 } finally {
@@ -1599,6 +2157,19 @@ try {
   }
 }
 
+if (ctx.secretSentinel != null) {
+  const evidenceRoot = resolve(OUT, "..");
+  ctx.secretEvidenceScan = grepFilesWithStdin(evidenceRoot, ctx.secretSentinel);
+  try {
+    const secretCasePath = resolve(OUT, "secret-masking.json");
+    const secretCase = JSON.parse(await readFile(secretCasePath, "utf8"));
+    secretCase.result ??= {};
+    secretCase.result.evidenceDirectoryRoot = evidenceRoot;
+    secretCase.result.evidenceDirectoryScan = ctx.secretEvidenceScan;
+    await writeFile(secretCasePath, JSON.stringify(secretCase, null, 2));
+  } catch {}
+}
+
 const counts = Object.fromEntries(["PASS", "FAIL", "BLOCKED"].map((status) => [
   status,
   results.filter((item) => item.status === status).length,
@@ -1609,6 +2180,7 @@ const summary = {
   guestSessionId: GUEST_SESSION_ID,
   setup: sanitize(ctx.setup, ctx.literals),
   setupBlockedReason: ctx.blockedReason,
+  selectedCases: selectedCases.map((definition) => definition.id),
   guestDisk: {
     beforeBotCapCase: ctx.guestDfBefore,
     afterBotCapCleanup: ctx.guestDfAfterCap,
@@ -1635,6 +2207,10 @@ const summary = {
   })),
   counts,
   cleanup: sanitize(ctx.cleanup, ctx.literals),
+  ...(ctx.secretEvidenceScan == null ? {} : {
+    secretEvidenceDirectoryRoot: resolve(OUT, ".."),
+    secretEvidenceDirectoryScan: ctx.secretEvidenceScan,
+  }),
   generatedAt: new Date().toISOString(),
 };
 await writeFile(resolve(OUT, "summary.json"), JSON.stringify(summary, null, 2));
@@ -1654,6 +2230,23 @@ await writeFile(resolve(OUT, "box-count.json"), JSON.stringify({
   before: ctx.boxCountBefore?.boxes ?? [],
   after: ctx.boxCountAfter?.boxes ?? [],
 }, null, 2));
+if (ctx.secretSentinel != null) {
+  const evidenceRoot = resolve(OUT, "..");
+  ctx.secretEvidenceScanFinal = grepFilesWithStdin(evidenceRoot, ctx.secretSentinel);
+  summary.secretEvidenceDirectoryRoot = evidenceRoot;
+  summary.secretEvidenceDirectoryScan = ctx.secretEvidenceScanFinal;
+  await writeFile(resolve(OUT, "summary.json"), JSON.stringify(summary, null, 2));
+  try {
+    const secretCasePath = resolve(OUT, "secret-masking.json");
+    const secretCase = JSON.parse(await readFile(secretCasePath, "utf8"));
+    secretCase.result ??= {};
+    secretCase.result.evidenceDirectoryRoot = evidenceRoot;
+    secretCase.result.evidenceDirectoryScan = ctx.secretEvidenceScanFinal;
+    await writeFile(secretCasePath, JSON.stringify(secretCase, null, 2));
+  } catch {}
+  ctx.literals.delete(ctx.secretSentinel);
+  ctx.secretSentinel = null;
+}
 console.log(`Summary PASS=${counts.PASS} FAIL=${counts.FAIL} BLOCKED=${counts.BLOCKED}`);
 const safetyFailed = ctx.boxCountAfter?.httpStatus !== 200 ||
   ctx.boxCountAfter?.taggedBoxCount !== 1 ||
