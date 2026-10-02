@@ -480,19 +480,48 @@ const cases = [
         extras.push(await createAgent(ctx, `Group-extra-${index + 1}-${RUN_SUFFIX}`, "Group limit probe"));
       }
       const seven = [a, b, ...extras].map((item) => item.id);
-      const rejected = await call(ctx, "setGroupMembers", { id: groupId, memberAgentIds: seven });
-      const limitError = !rejected.error && rejected.status >= 400
-        ? null
-        : rejected.error
-          ? `setGroupMembers rejection could not be verified: ${rejected.error}`
-          : rejected.status >= 200 && rejected.status < 300
-            ? "setGroupMembers accepted seven distinct agents"
-            : `setGroupMembers rejection returned HTTP ${rejected.status || "network-error"}`;
+      const sevenMemberResponse = await call(ctx, "setGroupMembers", {
+        id: groupId,
+        memberAgentIds: seven,
+      });
+      const sevenMemberResult = sevenMemberResponse.status >= 200 &&
+        sevenMemberResponse.status < 300 && !sevenMemberResponse.error
+        ? sevenMemberResponse.body
+        : null;
+      const updatedGroups = await listAgents(ctx);
+      const updatedGroup = updatedGroups.find((item) =>
+        item.id === groupId || item.name === groupName);
+      const updatedMembers = updatedGroup?.memberIds ??
+        updatedGroup?.memberAgentIds ??
+        updatedGroup?.members ??
+        sevenMemberResult?.memberIds ??
+        sevenMemberResult?.memberAgentIds ??
+        sevenMemberResult?.members;
+      const truncatedMemberIds = Array.isArray(updatedMembers)
+        ? updatedMembers.map((item) => typeof item === "string"
+          ? item
+          : item?.id ?? item?.agentId ?? item?.agent_id).filter(Boolean)
+        : [];
+      const limitError = sevenMemberResponse.error ||
+        sevenMemberResponse.status < 200 ||
+        sevenMemberResponse.status >= 300
+        ? `setGroupMembers returned HTTP ${sevenMemberResponse.status || "network-error"}${sevenMemberResponse.error ? `: ${sevenMemberResponse.error}` : ""}`
+        : !Array.isArray(updatedMembers)
+          ? "setGroupMembers did not return the truncated member list"
+          : truncatedMemberIds.length > 6
+            ? `setGroupMembers returned ${truncatedMemberIds.length} members after a seven-member request`
+            : null;
       const restored = await call(ctx, "setGroupMembers", { id: groupId, memberAgentIds: [a.id, b.id] });
       expectOk(restored, "setGroupMembers restore");
       const result = await sendAndWait(ctx, groupId, `@${a.name} reply with exactly the word groupok`, "groupok");
       if (limitError) throw new Error(limitError);
-      return { groupId, memberCount: 2, sevenMemberStatus: rejected.status, groupok: Boolean(result.transcript) };
+      return {
+        groupId,
+        memberCount: 2,
+        sevenMemberStatus: sevenMemberResponse.status,
+        truncatedMemberIds,
+        groupok: Boolean(result.transcript),
+      };
     },
   },
   {
@@ -637,19 +666,27 @@ const cases = [
   {
     id: "search",
     run: async (ctx) => {
-      const scout = requireAgent(ctx, "scout");
-      const search = await call(ctx, "searchAgents", { query: scout.name, limit: 20 });
+      const botB = requireAgent(ctx, "b");
+      const marker = `ping-${RUN_SUFFIX}`;
+      const search = await call(ctx, "searchAgents", { query: marker, limit: 20 });
       const agents = !search.error && search.status >= 200 && search.status < 300
         ? listBody(search.body)
         : [];
-      const agentFound = agents.some((item) => item.id === scout.id || item.agentId === scout.id);
-      const media = await call(ctx, "searchMedia", { query: scout.name, limit: 20 });
+      const agentFound = agents.some((item) =>
+        item.id === botB.id || item.agentId === botB.id);
+      const media = await call(ctx, "searchMedia", { query: marker, limit: 20 });
       expectOk(media, "searchMedia");
       if (search.error || search.status < 200 || search.status >= 300) {
         throw new Error(`searchAgents returned HTTP ${search.status || "network-error"}`);
       }
-      if (!agentFound) throw new Error("searchAgents did not return Bot 1");
-      return { agentFound, mediaReturned: true, mediaCount: listBody(media.body).length };
+      if (!agentFound) throw new Error(`searchAgents did not return Bot B (${botB.id}) for ${marker}`);
+      return {
+        query: marker,
+        botBId: botB.id,
+        agentFound,
+        mediaReturned: true,
+        mediaCount: listBody(media.body).length,
+      };
     },
   },
   {
