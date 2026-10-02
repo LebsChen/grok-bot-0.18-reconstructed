@@ -77,6 +77,11 @@ function collectAssistantText(value, result = []) {
       result.push(value.content.text);
     }
   }
+  if (value.kind === "send-message" &&
+      value.message?.type === "text" &&
+      typeof value.message.content === "string") {
+    result.push(value.message.content);
+  }
   for (const child of Object.values(value)) collectAssistantText(child, result);
   return result;
 }
