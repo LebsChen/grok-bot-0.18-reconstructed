@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -69,7 +69,10 @@ const fixtureServerScript = [
 async function withRuntime(callback) {
   const { module } = await loadRuntimeModule();
   const workspace = await mkdtemp(path.join(os.tmpdir(), "grok-box-exec-workspace-"));
-  const runtime = new module.BoxExecRuntime(workspace, path.join(workspace, "terminals"), {});
+  const terminals = path.join(workspace, "terminals");
+  await mkdir(terminals, { recursive: true });
+  const [workspaceRoot, terminalsDirectory] = await Promise.all([realpath(workspace), realpath(terminals)]);
+  const runtime = new module.BoxExecRuntime(workspaceRoot, terminalsDirectory, {});
   const loaded = await runtime.loadMcpServers({
     mcpConfigJson: JSON.stringify({
       mcpServers: {
@@ -83,7 +86,7 @@ async function withRuntime(callback) {
   });
   try {
     assert.deepEqual(loaded.loadedServerNames, ["fixture"]);
-    await callback({ runtime, workspace });
+    await callback({ runtime, workspace: workspaceRoot });
   } finally {
     await runtime.stop();
     await rm(workspace, { recursive: true, force: true });
@@ -174,7 +177,7 @@ test("readMcpResourceExecArgs returns resource content and writes an optional do
       downloadPath: "downloaded-resource.txt",
     });
     assert.equal(response.case, "readMcpResourceExecResult");
-    assert.equal(response.value.result.case, "success");
+    assert.equal(response.value.result.case, "success", JSON.stringify(response.value.result));
     const result = response.value.result.value;
     assert.equal(result.uri, "test://resource");
     assert.equal(result.content.case, "text");
