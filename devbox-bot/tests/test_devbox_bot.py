@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import http.server
+import importlib.util
 import io
 import json
 import os
@@ -737,6 +738,42 @@ def _start_provision_listener(tmp_path, *, idle="900"):
     return proc, port, home
 
 
+def _load_provision_module():
+    path = (Path(__file__).resolve().parent.parent
+            / "box" / "provision.py")
+    spec = importlib.util.spec_from_file_location(
+        "grok_bot_box_provision_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _prepare_provision_module(module, tmp_path):
+    home = tmp_path / "grok-bot-box"
+    home.mkdir()
+    module.GB_HOME = home
+    module.CREDS = home / "creds.env"
+    module.CREDS.write_text("GROKBOT_GATEWAY_TOKEN='test-token'\n")
+    module.LOG_DIR = home / "logs"
+    module.START_LOG = module.LOG_DIR / "start-box.log"
+    module.PIDFILE = home / "provision.pid"
+    return home
+
+
+class _FakeStartBoxProcess:
+    def __init__(self, pid, exit_code):
+        self.pid = pid
+        self.exit_code = exit_code
+        self.wait_calls = 0
+
+    def poll(self):
+        return self.exit_code
+
+    def wait(self):
+        self.wait_calls += 1
+        return self.exit_code
+
+
 def _get_json(port, path):
     with urllib.request.urlopen(
             f"http://127.0.0.1:{port}{path}", timeout=5) as response:
@@ -810,11 +847,14 @@ def test_start_box_bounds_runtime_downloads_and_retries_size_head():
                for command in downloads)
 
     head = next(command for command in curl_commands
-                if "-fsIL" in command and "RUNTIME_URL" in command)
+                if "-fsSIL" in command and "RUNTIME_URL" in command)
     assert "--max-time 20" in head
     assert "--retry 3" in head
     assert "--retry-all-errors" in head
     assert "--retry-delay 2" in head
+    assert "|| true" in head
+    assert """trap 'echo "start-box: failed rc=$? line=$LINENO" >&2' ERR""" \
+        in script
 
     fallback = next(command for command in downloads
                     if '"$PACK"' in command)
@@ -830,6 +870,126 @@ def test_start_box_bounds_runtime_downloads_and_retries_size_head():
                     if 'RUNTIME_URL.sha256' in command)
     assert "--speed-limit 1" in checksum
     assert "--speed-time 20" in checksum
+
+
+def test_start_box_size_probe_is_nonfatal_and_err_trap_is_installed():
+    script = (Path(__file__).resolve().parent.parent / "box" /
+              "start-box.sh").read_text()
+    assert """trap 'echo "start-box: failed rc=$? line=$LINENO" >&2' ERR""" \
+        in script
+    assert "-fsSIL" in script
+    assert '|| true)"' in script
+
+
+def test_provision_supervision_retries_nonzero_exits_three_times(
+        tmp_path, monkeypatch):
+    module = _load_provision_module()
+    home = _prepare_provision_module(module, tmp_path)
+    clock = [0.0]
+    processes = [
+        _FakeStartBoxProcess(1101, 7),
+        _FakeStartBoxProcess(1102, 8),
+        _FakeStartBoxProcess(1103, 9),
+    ]
+    launched = []
+
+    def launch():
+        proc = processes[len(launched)]
+        launched.append(proc)
+        return proc
+
+    monkeypatch.setattr(module, "_launch_start_box", launch)
+    monkeypatch.setattr(module, "_services_running", lambda: False)
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    server = module.ProvisionServer(("127.0.0.1", 0), module.Handler)
+    try:
+        server.launch_start_box()
+        server.supervise_start_box()
+        assert launched == processes[:1]
+        assert processes[0].wait_calls == 1
+        assert not (home / "start-box.pid").exists()
+        status = module._listener_status(server)
+        assert status["start_box_exit_code"] == 7
+        assert status["start_box_attempts"] == 1
+        assert status["state"] == "provisioning"
+
+        clock[0] = 9
+        server.supervise_start_box()
+        assert len(launched) == 1
+        clock[0] = 10
+        server.supervise_start_box()
+        assert len(launched) == 2
+        server.supervise_start_box()
+        assert processes[1].wait_calls == 1
+
+        clock[0] = 19
+        server.supervise_start_box()
+        assert len(launched) == 2
+        clock[0] = 20
+        server.supervise_start_box()
+        assert len(launched) == 3
+        server.supervise_start_box()
+        assert processes[2].wait_calls == 1
+
+        status = module._listener_status(server)
+        assert status["start_box_exit_code"] == 9
+        assert status["start_box_attempts"] == 3
+        assert status["phase"] == "start-box-failed"
+        assert status["state"] == "provisioning"
+        assert len(launched) == 3
+    finally:
+        server.server_close()
+
+
+def test_provision_supervision_does_not_retry_exit_zero(
+        tmp_path, monkeypatch):
+    module = _load_provision_module()
+    _prepare_provision_module(module, tmp_path)
+    process = _FakeStartBoxProcess(1201, 0)
+    launches = []
+    monkeypatch.setattr(
+        module, "_launch_start_box",
+        lambda: launches.append(process) or process)
+    monkeypatch.setattr(module, "_services_running", lambda: False)
+    server = module.ProvisionServer(("127.0.0.1", 0), module.Handler)
+    try:
+        server.launch_start_box()
+        server.supervise_start_box()
+        server.supervise_start_box()
+        status = module._listener_status(server)
+        assert launches == [process]
+        assert process.wait_calls == 1
+        assert status["start_box_exit_code"] == 0
+        assert status["start_box_attempts"] == 1
+        assert status["phase"] != "start-box-failed"
+    finally:
+        server.server_close()
+
+
+def test_provision_supervision_does_not_retry_when_services_are_running(
+        tmp_path, monkeypatch):
+    module = _load_provision_module()
+    _prepare_provision_module(module, tmp_path)
+    process = _FakeStartBoxProcess(1301, 4)
+    launches = []
+    monkeypatch.setattr(
+        module, "_launch_start_box",
+        lambda: launches.append(process) or process)
+    monkeypatch.setattr(module, "_services_running", lambda: True)
+    server = module.ProvisionServer(("127.0.0.1", 0), module.Handler)
+    try:
+        server.launch_start_box()
+        server.supervise_start_box()
+        status = module._listener_status(server)
+        assert launches == [process]
+        assert process.wait_calls == 1
+        assert status["start_box_exit_code"] == 4
+        assert status["start_box_attempts"] == 1
+        assert status["phase"] != "start-box-failed"
+        server.supervise_start_box()
+        assert launches == [process]
+    finally:
+        server.server_close()
 
 
 def test_provision_listener_flow_and_second_post_409(tmp_path):

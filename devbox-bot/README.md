@@ -1,6 +1,6 @@
 # devbox_bot — Grok Bot ↔ DevBox bridge (plugin/bot)
 
-> Vendored from DevBox `plugin/bot/` at source commit `24c6b332` (2026-10-02).
+> Vendored from DevBox `plugin/bot/` at source commit `26050aaf` (2026-10-02).
 
 A standalone backend that lets the Grok Bot desktop (Cursor fork) run
 entirely against a DevBox deployment — sign-in, account, box allocation

@@ -13,6 +13,7 @@
 #   GROKBOT_RUNTIME_URL          runtime pack URL (tar.gz + .sha256)
 #   GROKBOT_LLM_BASE_URL/_API_KEY/_MODEL   org secrets → inference
 set -euo pipefail
+trap 'echo "start-box: failed rc=$? line=$LINENO" >&2' ERR
 
 # The provisioning listener writes the allow-listed credentials to this
 # mode-0600 file before launching the startup script.
@@ -75,9 +76,9 @@ if [ ! -f "$MARKER" ]; then
   fi
   # Pull the pack in parallel chunks when size is available; bounded
   # low-speed retries recover from wedged connections.
-  SIZE="$(curl --http1.1 -fsIL --connect-timeout 15 --max-time 20 \
+  SIZE="$(curl --http1.1 -fsSIL --connect-timeout 15 --max-time 20 \
       --retry 3 --retry-all-errors --retry-delay 2 "${AUTH[@]}" \
-      "$RUNTIME_URL" | awk 'BEGIN{IGNORECASE=1} /^content-length:/ {n=$2} END{gsub(/\r/,"",n); print n}')"
+      "$RUNTIME_URL" | awk 'BEGIN{IGNORECASE=1} /^content-length:/ {n=$2} END{gsub(/\r/,"",n); print n}' || true)"
   if [ -n "$SIZE" ] && [ "$SIZE" -gt 1048576 ] 2>/dev/null; then
     N=8; PART=$(( (SIZE + N - 1) / N )); pids=()
     rm -f "$GB_HOME"/.part-*

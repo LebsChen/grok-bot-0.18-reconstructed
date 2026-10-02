@@ -26,6 +26,8 @@ START_LOG = LOG_DIR / "start-box.log"
 IDLE_S = max(1, int(os.environ.get("GROKBOT_PROVISION_IDLE_S", "900")))
 PORT = int(os.environ.get("GROKBOT_PROVISION_PORT", "7813"))
 MAX_BODY = 64 * 1024
+START_BOX_MAX_ATTEMPTS = 3
+START_BOX_RETRY_S = 10
 
 ALLOWED_KEYS = frozenset({
     "GROKBOT_GATEWAY_TOKEN",
@@ -121,16 +123,10 @@ def _launch_start_box() -> subprocess.Popen | None:
 
 
 def _resume_or_exit() -> int | None:
-    """Avoid duplicate listeners and resume an existing credentialed box."""
+    """Avoid starting a second provisioning listener."""
     existing_pid = _pid_from(PIDFILE)
     if _pid_alive(existing_pid) and existing_pid != os.getpid():
         return 0
-    if not CREDS.exists():
-        return None
-    if not _services_running():
-        proc = _launch_start_box()
-        if proc is not None:
-            _write_pid(GB_HOME / "start-box.pid", proc.pid)
     return None
 
 
@@ -173,7 +169,7 @@ def _phase(logs: list[str], values: dict[str, str]) -> str:
     return "download" if values else "awaiting"
 
 
-def _listener_status() -> dict:
+def _listener_status(server: ProvisionServer | None = None) -> dict:
     values = _read_creds()
     secret_values = list(values.values())
     logs = _tail_logs(secret_values)
@@ -183,7 +179,13 @@ def _listener_status() -> dict:
              "provisioned" if services_up else "provisioning")
     return {
         "state": state,
-        "phase": _phase(logs, values),
+        "phase": ("start-box-failed"
+                  if server is not None and server.start_box_failed
+                  else _phase(logs, values)),
+        "start_box_exit_code": (
+            server.start_box_exit_code if server is not None else None),
+        "start_box_attempts": (
+            server.start_box_attempts if server is not None else 0),
         "pids": {
             "listener": {
                 "pid": os.getpid(), "alive": True,
@@ -232,6 +234,57 @@ class ProvisionServer(ThreadingHTTPServer):
         self.started_at = time.monotonic()
         self.accepted = CREDS.exists()
         self.lock = threading.Lock()
+        self.start_box_lock = threading.RLock()
+        self.start_box_process = None
+        self.start_box_exit_code: int | None = None
+        self.start_box_attempts = 0
+        self.start_box_retry_at: float | None = None
+        self.start_box_failed = False
+
+    def launch_start_box(self):
+        with self.start_box_lock:
+            if (self.start_box_process is not None
+                    or self.start_box_attempts >= START_BOX_MAX_ATTEMPTS):
+                return self.start_box_process
+            proc = _launch_start_box()
+            if proc is not None:
+                self.start_box_attempts += 1
+                self.start_box_process = proc
+                self.start_box_retry_at = None
+                _write_pid(GB_HOME / "start-box.pid", proc.pid)
+            return proc
+
+    def supervise_start_box(self) -> None:
+        with self.start_box_lock:
+            now = time.monotonic()
+            proc = self.start_box_process
+            if proc is not None:
+                exit_code = proc.poll()
+                if exit_code is None:
+                    return
+                self.start_box_exit_code = proc.wait()
+                pidfile = GB_HOME / "start-box.pid"
+                if _pid_from(pidfile) == proc.pid:
+                    pidfile.unlink(missing_ok=True)
+                self.start_box_process = None
+                if self.start_box_exit_code == 0 or _services_running():
+                    self.start_box_retry_at = None
+                    return
+                if self.start_box_attempts >= START_BOX_MAX_ATTEMPTS:
+                    self.start_box_failed = True
+                    self.start_box_retry_at = None
+                else:
+                    self.start_box_retry_at = now + START_BOX_RETRY_S
+                return
+
+            if self.start_box_retry_at is None:
+                return
+            if _services_running():
+                self.start_box_retry_at = None
+                return
+            if now >= self.start_box_retry_at:
+                self.start_box_retry_at = None
+                self.launch_start_box()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -250,11 +303,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        self.server.supervise_start_box()
         if path == "/health":
-            status = _listener_status()
+            status = _listener_status(self.server)
             self._json(200, {"state": status["state"]})
         elif path == "/status":
-            self._json(200, _listener_status())
+            self._json(200, _listener_status(self.server))
         else:
             self._json(404, {"error": "not_found"})
 
@@ -305,12 +359,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise
             self.server.accepted = True
             try:
-                proc = _launch_start_box()
+                self.server.launch_start_box()
             except OSError:
                 self._json(503, {"error": "start_failed"})
                 return
-            if proc is not None:
-                _write_pid(GB_HOME / "start-box.pid", proc.pid)
             self._json(202, {"state": "provisioning"})
 
 
@@ -335,9 +387,12 @@ def main() -> int:
         stream.write(f"{os.getpid()}\n")
     server = ProvisionServer(("0.0.0.0", PORT), Handler)
     server.timeout = 0.5
+    if CREDS.exists() and not _services_running():
+        server.launch_start_box()
     try:
         while True:
             server.handle_request()
+            server.supervise_start_box()
             if (not server.accepted
                     and time.monotonic() - server.started_at >= IDLE_S):
                 break
