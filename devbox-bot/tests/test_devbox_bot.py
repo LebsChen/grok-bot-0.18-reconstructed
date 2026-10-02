@@ -275,6 +275,102 @@ def test_stream_inference(monkeypatch):
     assert usage and usage[0].usage.total_tokens == 5
 
 
+def test_stream_inference_preserves_tool_call_arguments(monkeypatch, caplog):
+    events = [
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "call-0",
+             "function": {"name": "SendMessage"}},
+            {"index": 1, "id": "call-1",
+             "function": {"name": "TodoWrite"}},
+        ]}, "finish_reason": ""}]},
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "function": {"arguments": '{"content":'}},
+            {"index": 1, "function": {"arguments": '{"todos":'}},
+        ]}, "finish_reason": ""}]},
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "function": {"arguments": '"hello"}'}},
+            {"index": 1, "function": {"arguments": '[]}' }},
+        ]}, "finish_reason": ""}]},
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+    sse = _FakeSSE([f"data: {json.dumps(event)}" for event in events]
+                   + ["data: [DONE]"])
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: sse)
+    caplog.set_level("INFO", logger="devbox_bot.inference")
+
+    frames = list(stream_inference(
+        _inference_request("m"), "http://x", "k"))
+    parts = [
+        frame.tool_call_part
+        for frame in frames
+        if frame.WhichOneof("response") == "tool_call_part"
+    ]
+    starts = [part for part in parts
+              if not part.is_complete and part.tool_name]
+    deltas = [part for part in parts
+              if not part.is_complete and not part.tool_name]
+    completed = [part for part in parts if part.is_complete]
+
+    assert [(part.tool_index, part.tool_name, part.tool_call_id,
+             part.args) for part in starts] == [
+        (0, "SendMessage", "call-0", ""),
+        (1, "TodoWrite", "call-1", ""),
+    ]
+    assert [(part.tool_index, part.tool_call_id, part.args)
+            for part in deltas] == [
+        (0, "call-0", '{"content":'),
+        (1, "call-1", '{"todos":'),
+        (0, "call-0", '"hello"}'),
+        (1, "call-1", '[]}'),
+    ]
+    assert all(not part.tool_name for part in deltas)
+    assert [(part.tool_index, part.tool_name, part.tool_call_id)
+            for part in completed] == [
+        (0, "SendMessage", "call-0"),
+        (1, "TodoWrite", "call-1"),
+    ]
+    assert [json.loads(part.args) for part in completed] == [
+        {"content": "hello"},
+        {"todos": []},
+    ]
+    assert "tools=SendMessage,TodoWrite" in caplog.text
+    assert "hello" not in caplog.text
+
+
+def test_stream_inference_buffers_args_until_tool_start(monkeypatch):
+    events = [
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "function": {"arguments": '{"x":'}},
+        ]}, "finish_reason": ""}]},
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "call-0",
+             "function": {"name": "SendMessage", "arguments": "1}"}},
+        ]}, "finish_reason": ""}]},
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+    sse = _FakeSSE([f"data: {json.dumps(event)}" for event in events]
+                   + ["data: [DONE]"])
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: sse)
+
+    frames = list(stream_inference(
+        _inference_request("m"), "http://x", "k"))
+    parts = [
+        frame.tool_call_part
+        for frame in frames
+        if frame.WhichOneof("response") == "tool_call_part"
+    ]
+
+    assert [(part.tool_name, part.args, part.is_complete)
+            for part in parts] == [
+        ("SendMessage", "", False),
+        ("", '{"x":1}', False),
+        ("SendMessage", '{"x":1}', True),
+    ]
+
+
 def test_stream_inference_logs_only_safe_request_metadata(monkeypatch, caplog):
     sse = _FakeSSE([
         ('data: {"choices":[{"delta":{"content":"private reply"},'

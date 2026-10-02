@@ -176,11 +176,15 @@ def stream_inference(req, base_url: str, api_key: str,
     has_usage = False
 
     def log_stream_end():
+        tool_names = ",".join(
+            state["name"] for _, state in sorted(tool_state.items())
+            if state["name"]) or "none"
         log.info(
             "inference stream ended: text_parts=%d thinking_parts=%d "
-            "tool_calls=%d finish_reason=%s usage=%s",
+            "tool_calls=%d finish_reason=%s usage=%s tools=%s",
             text_parts, thinking_parts, len(tool_state),
-            finish_reason or "none", "y" if has_usage else "n")
+            finish_reason or "none", "y" if has_usage else "n",
+            tool_names)
 
     try:
         resp = urllib.request.urlopen(http_req, timeout=timeout)
@@ -233,26 +237,55 @@ def stream_inference(req, base_url: str, api_key: str,
                     for tc in delta.get("tool_calls") or []:
                         idx = tc.get("index", 0)
                         state = tool_state.setdefault(
-                            idx, {"id": "", "name": ""})
+                            idx, {
+                                "id": "", "name": "", "args": "",
+                                "started": False, "completed": False})
                         if tc.get("id"):
                             state["id"] = tc["id"]
                         fn = tc.get("function") or {}
                         if fn.get("name"):
                             state["name"] = fn["name"]
-                        if fn.get("arguments"):
+                        args_delta = fn.get("arguments") or ""
+                        if args_delta:
+                            state["args"] += args_delta
+                        started_now = False
+                        if (state["id"] and state["name"]
+                                and not state["started"]):
+                            state["started"] = True
+                            started_now = True
                             yield frame(tool_call_part={
                                 "tool_call_id": state["id"],
                                 "tool_name": state["name"],
-                                "args": fn["arguments"],
+                                "tool_index": idx})
+                        if started_now and state["args"]:
+                            yield frame(tool_call_part={
+                                "tool_call_id": state["id"],
+                                "args": state["args"],
+                                "tool_index": idx})
+                        elif state["started"] and args_delta:
+                            yield frame(tool_call_part={
+                                "tool_call_id": state["id"],
+                                "args": args_delta,
                                 "tool_index": idx})
                     if choice.get("finish_reason"):
                         finish_reason = choice["finish_reason"]
                         for idx, state in tool_state.items():
+                            if state["completed"]:
+                                continue
+                            if (state["id"] and state["name"]
+                                    and not state["started"]):
+                                state["started"] = True
+                                yield frame(tool_call_part={
+                                    "tool_call_id": state["id"],
+                                    "tool_name": state["name"],
+                                    "tool_index": idx})
                             yield frame(tool_call_part={
                                 "tool_call_id": state["id"],
                                 "tool_name": state["name"],
+                                "args": state["args"] or "{}",
                                 "is_complete": True,
                                 "tool_index": idx})
+                            state["completed"] = True
                         yield frame(text_part={"is_final": True})
     except Exception as exc:  # noqa: BLE001 — stream read failure
         log.warning("upstream unreachable: %s", exc)
