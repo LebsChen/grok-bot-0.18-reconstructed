@@ -315,13 +315,24 @@ if [ ! -d "$EXEC_DAEMON_DIRECTORY" ]; then
     exit 1
   fi
   if [ -w / ]; then
-    mkdir -- "$EXEC_DAEMON_DIRECTORY"
+    mkdir -m 0755 -- "$EXEC_DAEMON_DIRECTORY"
   else
-    sudo -n mkdir -p -- "$EXEC_DAEMON_DIRECTORY" || {
+    sudo -n install -d -m 0755 -- "$EXEC_DAEMON_DIRECTORY" || {
       echo "start-box: could not create /exec-daemon" >&2
       exit 1
     }
   fi
+fi
+# Repair a previously-created /exec-daemon that is not traversable by
+# this user (a restrictive umask during an earlier creation leaves it
+# root-owned mode 0700, so per-window start-window fails with
+# "Permission denied" launching /exec-daemon/exec-daemon).
+if [ -d "$EXEC_DAEMON_DIRECTORY" ] && [ ! -x "$EXEC_DAEMON_DIRECTORY" ]; then
+  chmod 0755 -- "$EXEC_DAEMON_DIRECTORY" 2>/dev/null \
+    || sudo -n chmod 0755 -- "$EXEC_DAEMON_DIRECTORY" || {
+      echo "start-box: /exec-daemon is not accessible" >&2
+      exit 1
+    }
 fi
 if [ -e "$EXEC_DAEMON_DIRECTORY/exec-daemon" ] \
     && [ ! -L "$EXEC_DAEMON_DIRECTORY/exec-daemon" ]; then
@@ -606,7 +617,7 @@ fi
 
 # host-main provisions box prompt artifacts under /home/box
 if [ ! -d /home/box ]; then
-  sudo -n mkdir -p /home/box 2>/dev/null \
+  sudo -n install -d -m 0755 /home/box 2>/dev/null \
     && sudo -n chown "$(id -u):$(id -g)" /home/box 2>/dev/null || true
 fi
 

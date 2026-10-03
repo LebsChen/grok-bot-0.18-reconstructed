@@ -15,6 +15,7 @@ import os
 import re
 import socket
 import subprocess
+import stat
 import sys
 import tarfile
 import threading
@@ -1812,7 +1813,50 @@ def test_start_box_stages_verified_runtime_before_replacing_live_pack():
     assert 'BOX_WORKSPACE_ROOT="$SAND_DATA_ROOT/box-workspace"' in script
     assert 'ln -sfn "$BOX_WORKSPACE_ROOT" /workspace' in script
     assert 'preserving real /exec-daemon/exec-daemon' in script
-    assert 'sudo -n mkdir -p -- "$EXEC_DAEMON_DIRECTORY"' in script
+    assert 'mkdir -m 0755 -- "$EXEC_DAEMON_DIRECTORY"' in script
+    assert ('sudo -n install -d -m 0755 -- "$EXEC_DAEMON_DIRECTORY"'
+            in script)
+    assert '[ ! -x "$EXEC_DAEMON_DIRECTORY" ]' in script
+    assert 'sudo -n chmod 0755 -- "$EXEC_DAEMON_DIRECTORY"' in script
+    assert 'start-box: /exec-daemon is not accessible' in script
+    assert 'sudo -n install -d -m 0755 /home/box' in script
+
+
+def test_start_box_exec_daemon_directory_explicit_mode(tmp_path):
+    """Execute the extracted /exec-daemon fragment under umask 077 and
+    assert both creation and repair paths end at mode 0755."""
+    package_dir = Path(__file__).resolve().parent.parent
+    script = (package_dir / "box" / "start-box.sh").read_text()
+    fragment_start = script.index('EXEC_DAEMON_DIRECTORY="/exec-daemon"')
+    fragment_end = script.index(
+        'if [ -e "$EXEC_DAEMON_DIRECTORY/exec-daemon" ]')
+    fragment = script[fragment_start:fragment_end]
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "sudo").write_text("#!/bin/sh\nshift\nexec \"$@\"\n")
+    (fake_bin / "sudo").chmod(0o755)
+
+    def run_fragment(directory):
+        body = fragment.replace(
+            'EXEC_DAEMON_DIRECTORY="/exec-daemon"',
+            f'EXEC_DAEMON_DIRECTORY="{directory}"')
+        return subprocess.run(
+            ["/usr/bin/env", "-i", f"PATH={fake_bin}:/usr/bin:/bin",
+             "bash", "-c", f"umask 077\n{body}"],
+            capture_output=True, text=True)
+
+    created = tmp_path / "exec-daemon-fresh"
+    result = run_fragment(created)
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(created.stat().st_mode) == 0o755
+
+    stale = tmp_path / "exec-daemon-stale"
+    stale.mkdir()
+    os.chmod(stale, 0o600)
+    result = run_fragment(stale)
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(stale.stat().st_mode) == 0o755
 
 
 def test_start_box_stops_owned_services_before_starting_replacements():
