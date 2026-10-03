@@ -36,10 +36,9 @@ import {
   type BackgroundShellSpawnArgs,
   type WriteShellStdinArgs,
 } from "../packages/proto/generated/agent/v1/background_shell_exec_pb.js";
-import {
-  ComputerUseError,
-  ComputerUseResult,
-} from "../packages/proto/generated/agent/v1/computer_use_tool_pb.js";
+import { detectComputerUseSupport, executeComputerUse } from "./computer-use.js";
+
+export { detectComputerUseSupport, executeComputerUse };
 import {
   ReadError,
   ReadFileNotFound,
@@ -275,13 +274,8 @@ export class BoxExecRuntime {
         case "computerUseArgs":
           yield client(request.id, request.execId, {
             case: "computerUseResult",
-            value: new ComputerUseResult({
-              result: {
-                case: "error",
-                value: new ComputerUseError({
-                  error: "Computer use is not available in this runtime.",
-                }),
-              },
+            value: await executeComputerUse(request.message.value, {
+              environment: this.#environment,
             }),
           });
           break;
@@ -436,6 +430,10 @@ export class BoxExecRuntime {
     }
   }
 
+  get environment(): NodeJS.ProcessEnv {
+    return this.#environment;
+  }
+
   async writeStdin(args: WriteShellStdinArgs): Promise<WriteShellStdinResult> {
     const running = this.#background.get(args.shellId);
     if (running == null) return new WriteShellStdinResult({ result: { case: "error", value: new WriteShellStdinError({ error: `Shell ${args.shellId} is not running` }) } });
@@ -536,7 +534,7 @@ export async function startBoxExecDaemon(options: BoxExecDaemonOptions): Promise
     routes(router) {
       router.service(BoxControlService, {
         ping: async () => new PingResponse(),
-        getCapabilities: async () => new GetCapabilitiesResponse({ computerUseSupported: false, installPluginArtifactSupported: false }),
+        getCapabilities: async () => new GetCapabilitiesResponse({ computerUseSupported: await detectComputerUseSupport(runtime.environment), installPluginArtifactSupported: false }),
         updateEnvironmentVariables: async request => new UpdateEnvironmentVariablesResponse(runtime.applyEnvironment(request)),
         loadMcpServers: async request => runtime.loadMcpServers(request),
       });

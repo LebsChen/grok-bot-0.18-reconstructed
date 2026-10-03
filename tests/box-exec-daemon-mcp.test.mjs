@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -66,13 +66,13 @@ const fixtureServerScript = [
   '});',
 ].join("\n");
 
-async function withRuntime(callback) {
+async function withRuntime(callback, environment = {}) {
   const { module } = await loadRuntimeModule();
   const workspace = await mkdtemp(path.join(os.tmpdir(), "grok-box-exec-workspace-"));
   const terminals = path.join(workspace, "terminals");
   await mkdir(terminals, { recursive: true });
   const [workspaceRoot, terminalsDirectory] = await Promise.all([realpath(workspace), realpath(terminals)]);
-  const runtime = new module.BoxExecRuntime(workspaceRoot, terminalsDirectory, {});
+  const runtime = new module.BoxExecRuntime(workspaceRoot, terminalsDirectory, environment);
   const loaded = await runtime.loadMcpServers({
     mcpConfigJson: JSON.stringify({
       mcpServers: {
@@ -187,15 +187,184 @@ test("readMcpResourceExecArgs returns resource content and writes an optional do
   });
 });
 
-test("computerUseArgs returns the proto error result when UI control is unavailable", async () => {
+test("computerUseArgs returns an error result when DISPLAY is unset", async () => {
   await withRuntime(async ({ runtime }) => {
     const response = await execute(runtime, "computerUseArgs", { actions: [] });
     assert.equal(response.case, "computerUseResult");
     assert.equal(response.value.result.case, "error");
-    assert.equal(response.value.result.value.error, "Computer use is not available in this runtime.");
+    assert.match(response.value.result.value.error, /DISPLAY/);
     assert.equal(response.value.result.value.actionCount, 0);
-    assert.equal(response.value.result.value.durationMs, 0);
   });
+  const { module } = await loadRuntimeModule();
+  assert.equal(await module.detectComputerUseSupport({ PATH: "/usr/bin" }), false);
+});
+
+const TINY_WEBP_BASE64 = Buffer.from(
+  "RIFF\x14\x00\x00\x00WEBPVP8 \x08\x00\x00\x00fake", "binary").toString("base64");
+
+async function withFakeComputerUseBin(callback, { failArg } = {}) {
+  const bin = await mkdtemp(path.join(os.tmpdir(), "grok-box-exec-bin-"));
+  const logPath = path.join(bin, "invocations.log");
+  const xdotool = [
+    "#!/bin/sh",
+    `echo xdotool "$@" >> "${logPath}"`,
+    'if [ "$1" = "getmouselocation" ]; then printf "X=12\\nY=34\\nSCREEN=0\\nWINDOW=1\\n"; fi',
+    `if [ -n "$CU_FAIL_ARG" ] && [ "$1" = "$CU_FAIL_ARG" ]; then echo "boom-$1" >&2; exit 1; fi`,
+    "exit 0",
+  ].join("\n");
+  const importTool = [
+    "#!/bin/sh",
+    `echo import "$@" >> "${logPath}"`,
+    `printf '${TINY_WEBP_BASE64}' | base64 -d`,
+    "exit 0",
+  ].join("\n");
+  await writeFile(path.join(bin, "xdotool"), xdotool, { mode: 0o755 });
+  await writeFile(path.join(bin, "import"), importTool, { mode: 0o755 });
+  const environment = {
+    DISPLAY: ":0",
+    PATH: `${bin}:/usr/bin:/bin`,
+    XDOTOOL_LOG: logPath,
+    ...(failArg ? { CU_FAIL_ARG: failArg } : {}),
+  };
+  const readLog = async () =>
+    (await readFile(logPath, "utf8").catch(() => ""))
+      .split("\n").filter(Boolean);
+  try {
+    await callback({ bin, logPath, environment, readLog });
+  } finally {
+    await rm(bin, { recursive: true, force: true });
+  }
+}
+
+const mouseAction = (name, value) => ({ action: { case: name, value } });
+
+test("computerUseArgs maps click modifiers, count, and captures a webp screenshot", async () => {
+  await withFakeComputerUseBin(async ({ environment, readLog }) => {
+    await withRuntime(async ({ runtime }) => {
+      const response = await execute(runtime, "computerUseArgs", {
+        actions: [mouseAction("click", {
+          coordinate: { x: 100, y: 200 },
+          button: 1, count: 2, modifierKeys: "ctrl+shift",
+        })],
+      });
+      assert.equal(response.value.result.case, "success");
+      const result = response.value.result.value;
+      assert.equal(result.actionCount, 1);
+      assert.ok(result.durationMs >= 0);
+      const decoded = Buffer.from(result.screenshot, "base64");
+      assert.equal(decoded.subarray(0, 4).toString("latin1"), "RIFF");
+      assert.equal(decoded.subarray(8, 12).toString("latin1"), "WEBP");
+      assert.deepEqual({ x: result.cursorPosition.x, y: result.cursorPosition.y },
+                       { x: 12, y: 34 });
+      const log = await readLog();
+      assert.deepEqual(log.filter(line => line.startsWith("xdotool")), [
+        "xdotool keydown ctrl",
+        "xdotool keydown shift",
+        "xdotool mousemove 100 200",
+        "xdotool click --repeat 2 1",
+        "xdotool keyup shift",
+        "xdotool keyup ctrl",
+        "xdotool getmouselocation --shell",
+      ]);
+      assert.deepEqual(log.filter(line => line.startsWith("import")),
+                       ["import -window root webp:-"]);
+    }, environment);
+  });
+});
+
+test("computerUseArgs maps drag, scroll, type, key-hold, and wait clamp", async () => {
+  const { module } = await loadRuntimeModule();
+  await withFakeComputerUseBin(async ({ environment }) => {
+    const argv = [];
+    const sleeps = [];
+    const result = await module.executeComputerUse({
+      actions: [
+        mouseAction("drag", { path: [{ x: 1, y: 2 }, { x: 3, y: 4 }, { x: 5, y: 6 }],
+                              button: 1, modifierKeys: "alt" }),
+        mouseAction("scroll", { coordinate: { x: 9, y: 9 }, direction: 2, amount: 3 }),
+        mouseAction("type", { text: "hello world" }),
+        mouseAction("key", { key: "ctrl+escape", holdDurationMs: 250 }),
+        mouseAction("wait", { durationMs: 99_999 }),
+      ],
+    }, {
+      environment,
+      runCommand: async (callArgv) => {
+        argv.push(callArgv);
+        if (callArgv[0] === "xdotool" && callArgv[1] === "getmouselocation") {
+          return { code: 0, stdout: "X=5\nY=6\n", stderr: "", stdoutBytes: Buffer.alloc(0) };
+        }
+        if (callArgv[0] === "import") {
+          return { code: 0, stdout: "", stderr: "",
+                   stdoutBytes: Buffer.from(TINY_WEBP_BASE64, "base64") };
+        }
+        return { code: 0, stdout: "", stderr: "", stdoutBytes: Buffer.alloc(0) };
+      },
+      sleep: async (ms) => { sleeps.push(ms); },
+      now: () => Date.now(),
+    });
+    assert.equal(result.result.case, "success", JSON.stringify(result.toJson()));
+    assert.ok(sleeps.includes(30_000));
+    assert.ok(sleeps.includes(250));
+    const xdo = argv.filter(call => call[0] === "xdotool").map(call => call.slice(1));
+    assert.deepEqual(xdo, [
+      ["keydown", "alt"],
+      ["mousemove", "1", "2"],
+      ["mousedown", "1"],
+      ["mousemove", "3", "4"],
+      ["mousemove", "5", "6"],
+      ["mouseup", "1"],
+      ["keyup", "alt"],
+      ["mousemove", "9", "9"],
+      ["click", "--repeat", "3", "5"],
+      ["type", "--delay", "12", "--", "hello world"],
+      ["keydown", "ctrl"],
+      ["keydown", "Escape"],
+      ["keyup", "Escape"],
+      ["keyup", "ctrl"],
+      ["getmouselocation", "--shell"],
+    ]);
+    assert.equal(result.result.value.actionCount, 5);
+  });
+});
+
+test("computerUseArgs reports the completed action count on mid-sequence failure", async () => {
+  const { module } = await loadRuntimeModule();
+  await withFakeComputerUseBin(async ({ environment }) => {
+    const result = await module.executeComputerUse({
+      actions: [
+        mouseAction("mouseMove", { coordinate: { x: 1, y: 1 } }),
+        mouseAction("type", { text: "x" }),
+        mouseAction("type", { text: "never reached" }),
+      ],
+    }, {
+      environment,
+      runCommand: async (callArgv) => {
+        if (callArgv[1] === "type") {
+          return { code: 1, stdout: "", stderr: "type blew up",
+                   stdoutBytes: Buffer.alloc(0) };
+        }
+        return { code: 0, stdout: "", stderr: "", stdoutBytes: Buffer.alloc(0) };
+      },
+      sleep: async () => {},
+      now: () => Date.now(),
+    });
+    assert.equal(result.result.case, "error");
+    assert.equal(result.result.value.actionCount, 1);
+    assert.match(result.result.value.error, /type blew up/);
+  });
+});
+
+test("computerUseArgs errors without DISPLAY and detectComputerUseSupport agrees", async () => {
+  const { module } = await loadRuntimeModule();
+  assert.equal(await module.detectComputerUseSupport({ PATH: "/usr/bin:/bin" }), false);
+  const result = await module.executeComputerUse({ actions: [] }, {
+    environment: { PATH: "/usr/bin:/bin" },
+    runCommand: async () => { throw new Error("must not run"); },
+    sleep: async () => {},
+    now: () => Date.now(),
+  });
+  assert.equal(result.result.case, "error");
+  assert.match(result.result.value.error, /DISPLAY/);
 });
 
 test("unsupported ExecServerMessage logging excludes request payloads", async () => {
