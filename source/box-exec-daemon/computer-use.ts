@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
+import path from "node:path";
 
 import {
   Coordinate,
@@ -84,7 +85,8 @@ async function defaultRunCommand(argv: string[], environment: NodeJS.ProcessEnv)
   const [command, ...rest] = argv;
   if (!command) return Promise.reject(new Error("empty command argv"));
   return new Promise((resolve, reject) => {
-    const child = spawn(command, rest, { env: environment }) as ChildProcessWithoutNullStreams;
+    const child = spawn(command, rest,
+      { env: environment, shell: process.platform === "win32" }) as ChildProcessWithoutNullStreams;
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     const timer = setTimeout(() => child.kill("SIGKILL"), COMMAND_TIMEOUT_MS);
@@ -118,12 +120,17 @@ async function executableOnPath(name: string, environment: NodeJS.ProcessEnv): P
       return false;
     }
   }
-  for (const directory of String(environment.PATH ?? "").split(":")) {
+  const candidates = process.platform === "win32"
+    ? [name, `${name}.exe`, `${name}.cmd`, `${name}.bat`]
+    : [name];
+  for (const directory of String(environment.PATH ?? "").split(path.delimiter)) {
     if (!directory) continue;
-    try {
-      await access(`${directory}/${name}`, constants.X_OK);
-      return true;
-    } catch {}
+    for (const candidate of candidates) {
+      try {
+        await access(path.join(directory, candidate), constants.X_OK);
+        return true;
+      } catch {}
+    }
   }
   return false;
 }

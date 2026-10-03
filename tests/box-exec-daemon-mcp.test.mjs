@@ -205,30 +205,51 @@ const TINY_WEBP_BASE64 = Buffer.from(
 async function withFakeComputerUseBin(callback, { failArg } = {}) {
   const bin = await mkdtemp(path.join(os.tmpdir(), "grok-box-exec-bin-"));
   const logPath = path.join(bin, "invocations.log");
-  const xdotool = [
-    "#!/bin/sh",
-    `echo xdotool "$@" >> "${logPath}"`,
-    'if [ "$1" = "getmouselocation" ]; then printf "X=12\\nY=34\\nSCREEN=0\\nWINDOW=1\\n"; fi',
-    `if [ -n "$CU_FAIL_ARG" ] && [ "$1" = "$CU_FAIL_ARG" ]; then echo "boom-$1" >&2; exit 1; fi`,
-    "exit 0",
-  ].join("\n");
-  const importTool = [
-    "#!/bin/sh",
-    `echo import "$@" >> "${logPath}"`,
-    `printf '${TINY_WEBP_BASE64}' | base64 -d`,
-    "exit 0",
-  ].join("\n");
-  await writeFile(path.join(bin, "xdotool"), xdotool, { mode: 0o755 });
-  await writeFile(path.join(bin, "import"), importTool, { mode: 0o755 });
+  const systemPath = process.platform === "win32"
+    ? process.env.SystemRoot ? `${process.env.SystemRoot}\\System32` : "C:\\Windows\\System32"
+    : "/usr/bin:/bin";
+  if (process.platform === "win32") {
+    const tinyWebp = path.join(bin, "tiny.webp");
+    await writeFile(tinyWebp, Buffer.from(TINY_WEBP_BASE64, "base64"));
+    await writeFile(path.join(bin, "xdotool.cmd"), [
+      "@echo off",
+      `echo xdotool %*>>"${logPath}"`,
+      'if "%1"=="getmouselocation" (echo X=12&echo Y=34&echo SCREEN=0&echo WINDOW=1)',
+      'if defined CU_FAIL_ARG if "%1"=="%CU_FAIL_ARG%" (echo boom-%1 1>&2&exit /b 1)',
+      "exit /b 0",
+    ].join("\r\n"));
+    await writeFile(path.join(bin, "import.cmd"), [
+      "@echo off",
+      `echo import %*>>"${logPath}"`,
+      `type "${tinyWebp}"`,
+      "exit /b 0",
+    ].join("\r\n"));
+  } else {
+    const xdotool = [
+      "#!/bin/sh",
+      `echo xdotool "$@" >> "${logPath}"`,
+      'if [ "$1" = "getmouselocation" ]; then printf "X=12\\nY=34\\nSCREEN=0\\nWINDOW=1\\n"; fi',
+      `if [ -n "$CU_FAIL_ARG" ] && [ "$1" = "$CU_FAIL_ARG" ]; then echo "boom-$1" >&2; exit 1; fi`,
+      "exit 0",
+    ].join("\n");
+    const importTool = [
+      "#!/bin/sh",
+      `echo import "$@" >> "${logPath}"`,
+      `printf '${TINY_WEBP_BASE64}' | base64 -d`,
+      "exit 0",
+    ].join("\n");
+    await writeFile(path.join(bin, "xdotool"), xdotool, { mode: 0o755 });
+    await writeFile(path.join(bin, "import"), importTool, { mode: 0o755 });
+  }
   const environment = {
     DISPLAY: ":0",
-    PATH: `${bin}:/usr/bin:/bin`,
+    PATH: `${bin}${path.delimiter}${systemPath}`,
     XDOTOOL_LOG: logPath,
     ...(failArg ? { CU_FAIL_ARG: failArg } : {}),
   };
   const readLog = async () =>
     (await readFile(logPath, "utf8").catch(() => ""))
-      .split("\n").filter(Boolean);
+      .split("\n").map(line => line.trim()).filter(Boolean);
   try {
     await callback({ bin, logPath, environment, readLog });
   } finally {
