@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -u
+
+fail() {
+  printf 'exec-daemon: %s\n' "$1" >&2
+  exit 2
+}
+
+if [ "$#" -eq 0 ] || [ "$1" != "serve" ]; then
+  fail "expected serve subcommand"
+fi
+shift
+
+port=""
+auth_token=""
+while [ "$#" -gt 0 ]; do
+  argument="$1"
+  shift
+  flag="${argument%%=*}"
+  attached_value=0
+  value=""
+  if [ "$flag" != "$argument" ]; then
+    attached_value=1
+    value="${argument#*=}"
+  fi
+
+  case "$flag" in
+    --port|--auth-token|--pty-websocket-port|--rg-path|--orbitd-proxy-socket)
+      if [ "$attached_value" -eq 0 ]; then
+        if [ "$#" -eq 0 ] || [[ "$1" == --* ]]; then
+          fail "missing value for $flag"
+        fi
+        value="$1"
+        shift
+      fi
+      case "$flag" in
+        --port) port="$value" ;;
+        --auth-token) auth_token="$value" ;;
+      esac
+      ;;
+    --computer-use-enabled|--mcp-meta-tool-enabled|--origin-cli-enabled)
+      ;;
+    --*)
+      printf '%s\n' "$flag" >&2
+      if [ "$attached_value" -eq 0 ] \
+          && [ "$#" -gt 0 ] && [[ "$1" != --* ]]; then
+        shift
+      fi
+      ;;
+    *)
+      ;;
+  esac
+done
+
+case "$port" in
+  ''|*[!0-9]*) fail "a valid --port is required" ;;
+esac
+if [ "${#port}" -gt 5 ] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+  fail "a valid --port is required"
+fi
+[ -n "$auth_token" ] || fail "--auth-token is required"
+
+shim_path="$(readlink -f -- "$0")" || fail "could not resolve shim path"
+shim_dir="$(cd -- "$(dirname -- "$shim_path")" && pwd -P)" \
+  || fail "could not resolve shim directory"
+pack_root="$(cd -- "$shim_dir/../.." && pwd -P)" \
+  || fail "could not resolve runtime pack"
+node_bin="$pack_root/node"
+daemon_entry="$pack_root/opt-sand/box-exec-daemon/main.cjs"
+[ -x "$node_bin" ] || fail "packaged node runtime is missing"
+[ -f "$daemon_entry" ] || fail "packaged exec-daemon is missing"
+
+workspace_root="$(realpath -e /workspace)" \
+  || fail "/workspace is unavailable"
+if [ -z "${HOME:-}" ]; then
+  HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6 || true)"
+  [ -n "$HOME" ] || fail "could not resolve HOME"
+fi
+export HOME
+if [ -z "${USER:-}" ]; then
+  USER="$(id -un)" || fail "could not resolve USER"
+  [ -n "$USER" ] || fail "could not resolve USER"
+fi
+export USER
+data_root="${SAND_DATA_ROOT:-$HOME/.sand}"
+terminals_directory="$data_root/box-terminals-$port"
+mkdir -p -- "$terminals_directory" \
+  || fail "could not create terminals directory"
+
+export SAND_BOX_EXEC_DAEMON_PORT="$port"
+export SAND_BOX_EXEC_DAEMON_AUTH_TOKEN="$auth_token"
+export SAND_BOX_WORKSPACE_ROOT="$workspace_root"
+export SAND_BOX_TERMINALS_DIRECTORY="$terminals_directory"
+exec "$node_bin" --disable-warning=ExperimentalWarning "$daemon_entry"

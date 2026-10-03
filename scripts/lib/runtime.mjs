@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { access, cp, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import { extractAll } from "@electron/asar";
-import { cacheDir, cachedRuntimeApp, sourceAppDir, upstreamAsarSha256, upstreamVersion } from "./config.mjs";
+import { extractAll, extractFile } from "@electron/asar";
+import { cacheDir, cachedRuntimeApp, repoRoot, runtimeResourcesDir, sourceAppDir, target, upstreamAsarSha256, upstreamVersion } from "./config.mjs";
 import { capture, run } from "./process.mjs";
 import { SYSTEM_TOOLS } from "./system-tools.mjs";
 
@@ -16,6 +16,20 @@ async function exists(target) {
 }
 
 export async function validateRuntimeApp(appPath) {
+  if (target === "win32-x64") {
+    const executable = path.join(appPath, "Grok Bot.exe");
+    const archive = path.join(appPath, "resources", "app.asar");
+    const unpacked = path.join(appPath, "resources", "app.asar.unpacked");
+    if (!(await stat(executable)).isFile() || !(await stat(archive)).isFile()
+        || !(await stat(unpacked)).isDirectory()) {
+      throw new Error(`Incomplete Grok Bot runtime at ${appPath}`);
+    }
+    const packageJson = JSON.parse(extractFile(archive, "package.json").toString("utf8"));
+    if (packageJson.version !== upstreamVersion) {
+      throw new Error(`Expected Grok Bot ${upstreamVersion}, got ${packageJson.version} at ${appPath}`);
+    }
+    return appPath;
+  }
   const infoPlist = path.join(appPath, "Contents", "Info.plist");
   const executable = path.join(appPath, "Contents", "MacOS", "Grok Bot");
   const unpacked = path.join(appPath, "Contents", "Resources", "app.asar.unpacked");
@@ -45,7 +59,11 @@ export async function cacheRuntimeFromApp(source) {
   const runtimeDir = path.dirname(cachedRuntimeApp);
   await mkdir(runtimeDir, { recursive: true });
   await rm(cachedRuntimeApp, { recursive: true, force: true });
-  await run(SYSTEM_TOOLS.ditto, [validated, cachedRuntimeApp]);
+  if (target === "win32-x64") {
+    await cp(validated, cachedRuntimeApp, { recursive: true, dereference: false, preserveTimestamps: true });
+  } else {
+    await run(SYSTEM_TOOLS.ditto, [validated, cachedRuntimeApp]);
+  }
   return await validateRuntimeApp(cachedRuntimeApp);
 }
 
@@ -87,8 +105,15 @@ export async function hydrateSourcePayloadFromAsar(archive, {
 }
 
 export async function hydrateSourcePayloadFromRuntime(runtimeApp, options = {}) {
-  const archive = path.join(await validateRuntimeApp(runtimeApp), "Contents", "Resources", "app.asar");
-  return hydrateSourcePayloadFromAsar(archive, options);
+  const archive = path.join(runtimeResourcesDir(await validateRuntimeApp(runtimeApp)), "app.asar");
+  const hydrated = await hydrateSourcePayloadFromAsar(archive, options);
+  if (target === "win32-x64") {
+    // buildAsar copies the (cached) win32 sourceAppDir wholesale, so the
+    // tracked reconstructed package.json must be staged alongside dist/.
+    await cp(path.join(repoRoot, "src", "app", "package.json"),
+      path.join(sourceAppDir, "package.json"), { preserveTimestamps: true });
+  }
+  return hydrated;
 }
 
 export async function copyTree(source, destination) {

@@ -1,0 +1,146 @@
+name: windows-x64
+
+on:
+  push:
+    branches: [devin/1790861083-windows-x64-devbox]
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: "DevBox session id for a live gateway smoke (optional)"
+        required: false
+
+jobs:
+  build-and-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26.5.0"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: npm ci --no-audit --no-fund
+      - run: npm run bootstrap:win
+      - run: npm run package:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reconstructed-package
+          path: "dist/Grok Bot 0.18 Reconstructed-win32-x64/reconstructed-package.json"
+      - name: DevBox gateway smoke
+        if: github.event_name == 'workflow_dispatch' && inputs.session_id != ''
+        env:
+          DEVBOX_SESSION_ID: ${{ inputs.session_id }}
+          DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
+        run: node scripts/ci/devbox-gateway-smoke.mjs gateway-smoke.json
+      - name: DevBox backend smoke (plugin/bot)
+        env:
+          DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
+          GROKBOT_LLM_BASE_URL: ${{ secrets.GROKBOT_LLM_BASE_URL }}
+          GROKBOT_LLM_API_KEY: ${{ secrets.GROKBOT_LLM_API_KEY }}
+          GROKBOT_LLM_MODEL: ${{ secrets.GROKBOT_LLM_MODEL }}
+          PYTHONPATH: ${{ github.workspace }}/devbox-bot
+          DEVBOX_ORIGIN: http://127.0.0.1:7811
+          GROKBOT_BOX_DEADLINE_S: "600"
+        run: |
+          if (-not $env:DEVBOX_API_KEY) { throw "DEVBOX_API_KEY secret is required" }
+          python -m pip install -r devbox-bot/requirements.txt
+          node_modules/.bin/esbuild scripts/ci/devbox-backend-smoke.mjs `
+            --bundle --platform=node --format=esm --packages=external `
+            --outfile=backend-smoke-bundle.mjs
+          $bot = Start-Process -FilePath python `
+            -ArgumentList "-m","devbox_bot.desktop","--port","7811" `
+            -PassThru -NoNewWindow `
+            -RedirectStandardOutput backend-bot.log `
+            -RedirectStandardError backend-bot-err.log
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try { Invoke-RestMethod http://127.0.0.1:7811/healthz | Out-Null; $ok = $true; break }
+              catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ok) { throw "devbox_bot.desktop did not come up on :7811" }
+            node backend-smoke-bundle.mjs backend-smoke.json
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "--- backend-bot-err.log ---"
+              Get-Content backend-bot-err.log -ErrorAction SilentlyContinue
+              Write-Host "--- backend-bot.log ---"
+              Get-Content backend-bot.log -ErrorAction SilentlyContinue
+              throw "backend smoke failed"
+            }
+          } finally {
+            Stop-Process -Id $bot.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Launch smoke (devbox_bot.desktop + CDP sign-in)
+        shell: pwsh
+        env:
+          DEVBOX_API_KEY: ${{ secrets.DEVBOX_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}/devbox-bot
+        run: |
+          $exe = "dist/Grok Bot 0.18 Reconstructed-win32-x64/Grok Bot.exe"
+          $botProc = $null
+          if ($env:DEVBOX_API_KEY) {
+            # headless DevBox backend: desktop.py in API-key mode
+            python -m pip install -r devbox-bot/requirements.txt
+            $botProc = Start-Process -FilePath python `
+              -ArgumentList "-m","devbox_bot.desktop","--port","7811" `
+              -PassThru -NoNewWindow `
+              -RedirectStandardOutput desktop-bot.log `
+              -RedirectStandardError desktop-bot-err.log
+            $ok = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try {
+                Invoke-RestMethod http://127.0.0.1:7811/healthz | Out-Null
+                $ok = $true; break
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ok) { throw "devbox_bot.desktop did not come up on :7811" }
+            $env:SAND_BACKEND_URL = "http://127.0.0.1:7811"
+            $env:CURSOR_API_BASE_URL = "http://127.0.0.1:7811"
+            $env:SAND_CURSOR_WEBSITE_URL = "http://127.0.0.1:7811"
+          }
+          $proc = Start-Process -FilePath $exe `
+            -ArgumentList "--remote-debugging-port=9229" -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try {
+                Invoke-RestMethod http://127.0.0.1:9229/json/version | Out-Null
+                $ready = $true; break
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ready) { throw "Grok Bot.exe did not open a CDP endpoint" }
+            node scripts/ci/cdp-screenshot.mjs 9229 window.png window.json
+            if ($env:DEVBOX_API_KEY) {
+              # click Sign-in; API-key mode completes any poll locally
+              node scripts/ci/cdp-click-signin.mjs 9229 window-signed-in.json 90
+              node scripts/ci/cdp-screenshot.mjs 9229 window-signed-in.png window-signed-in-2.json
+            } elseif ($env:SAND_HOST_GATEWAY_URL) {
+              Start-Sleep -Seconds 20
+              node scripts/ci/cdp-screenshot.mjs 9229 window-connected.png window-connected.json
+            }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            if ($botProc) { Stop-Process -Id $botProc.Id -Force -ErrorAction SilentlyContinue }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: window-screenshot
+          path: |
+            window.png
+            window.json
+            window-signed-in.png
+            window-signed-in.json
+            window-signed-in-2.json
+            window-connected.png
+            window-connected.json
+            gateway-smoke.json
+            backend-smoke.json
+            backend-bot.log
+            backend-bot-err.log
+            desktop-bot.log
+            desktop-bot-err.log

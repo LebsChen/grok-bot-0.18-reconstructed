@@ -27,7 +27,7 @@ function isUnpackedRuntimeFile(relative) {
   return unpackedPrefixes.some(prefix => relative.startsWith(prefix));
 }
 
-async function snapshotFiles(root) {
+export async function snapshotFiles(root) {
   const files = await walkFiles(root);
   return new Map(await Promise.all(files.map(async relative => {
     const target = path.join(root, relative);
@@ -46,12 +46,23 @@ function snapshotDiff(before, after) {
   return differences;
 }
 
-async function archiveFileEntries(archivePath) {
+// @electron/asar listFiles joins with the host path separator: on win32 the
+// listing looks like "\dist\deps\x.js", on POSIX "/dist/deps/x.js".
+// Normalize to POSIX relatives at the comparison boundary so the staged
+// snapshot (already "/"-relative) matches archive entries on every host.
+export function normalizeArchiveRelative(raw) {
+  return raw.replace(/^[\\/]+/, "").replace(/\\/g, "/");
+}
+
+export async function archiveFileEntries(archivePath, {
+  listPackageImpl = listPackage,
+  statFileImpl = statFile,
+} = {}) {
   const entries = new Map();
-  for (const raw of listPackage(archivePath)) {
-    const relative = raw.replace(/^\//, "");
+  for (const raw of listPackageImpl(archivePath)) {
+    const relative = normalizeArchiveRelative(raw);
     try {
-      const entry = statFile(archivePath, relative);
+      const entry = statFileImpl(archivePath, relative.split("/").join(path.sep));
       if (typeof entry.size === "number") entries.set(relative, entry);
     } catch {
       // listPackage includes directories; statFile is the file boundary.
@@ -60,10 +71,10 @@ async function archiveFileEntries(archivePath) {
   return entries;
 }
 
-export async function verifyStagedPackageIntegrity({ stageRoot, archivePath, unpackedRoot, before }) {
+export async function verifyStagedPackageIntegrity({ stageRoot, archivePath, unpackedRoot, before, archiveEntriesImpl = archiveFileEntries }) {
   const after = await snapshotFiles(stageRoot);
   const differences = snapshotDiff(before, after);
-  const archive = await archiveFileEntries(archivePath);
+  const archive = await archiveEntriesImpl(archivePath);
   for (const [relative, expected] of before) {
     const entry = archive.get(relative);
     if (entry == null) {
