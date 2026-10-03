@@ -369,6 +369,25 @@ if [ -n "$RG_BINARY" ]; then
 else
   echo "start-box: no ripgrep executable available; /exec-daemon/rg omitted" >&2
 fi
+# box-bounded-log resolves node via ${SAND_BOX_BOUNDED_LOG_NODE:-
+# /exec-daemon/node}; without the link every bounded-log sink fails
+# silently (only .lock files appear).
+NODE_BINARY="$PACK_DIR/node"
+if [ -x "$NODE_BINARY" ]; then
+  if [ -e "$EXEC_DAEMON_DIRECTORY/node" ] \
+      && [ ! -L "$EXEC_DAEMON_DIRECTORY/node" ]; then
+    echo "start-box: preserving real /exec-daemon/node"
+  elif [ -w "$EXEC_DAEMON_DIRECTORY" ]; then
+    ln -sfn -- "$NODE_BINARY" "$EXEC_DAEMON_DIRECTORY/node"
+  else
+    sudo -n ln -sfn -- "$NODE_BINARY" "$EXEC_DAEMON_DIRECTORY/node" || {
+      echo "start-box: could not link /exec-daemon/node" >&2
+      exit 1
+    }
+  fi
+else
+  echo "start-box: no node runtime available; /exec-daemon/node omitted" >&2
+fi
 
 # ── python + protobuf for box.py ────────────────────────────────────
 PY="$(command -v python3 || true)"
@@ -619,6 +638,32 @@ fi
 if [ ! -d /home/box ]; then
   sudo -n install -d -m 0755 /home/box 2>/dev/null \
     && sudo -n chown "$(id -u):$(id -g)" /home/box 2>/dev/null || true
+fi
+
+# start-desktop.sh (per-window, DISPLAY>=2, run as this user) writes
+# /usr/local/bin/box-chrome with `cat >` under set -euo pipefail; on a
+# root-owned /usr/local/bin that write fails and the script exits right
+# after starting picom. Pre-create a writable placeholder the `cat >`
+# can truncate in place.
+if [ -d /usr/local/bin ] && [ ! -w /usr/local/bin/box-chrome ]; then
+  if [ -w /usr/local/bin ]; then
+    install -m 0755 /dev/null /usr/local/bin/box-chrome 2>/dev/null || true
+  else
+    sudo -n install -m 0755 -o "$(id -u)" -g "$(id -g)" /dev/null \
+      /usr/local/bin/box-chrome 2>/dev/null \
+      || echo "start-box: could not pre-create /usr/local/bin/box-chrome" >&2
+  fi
+fi
+
+# Per-window desktops need a window manager, compositor and root painter;
+# images missing them leave a solid-colour screen. Best-effort install.
+if ! command -v xfwm4 >/dev/null 2>&1 \
+    || ! command -v picom >/dev/null 2>&1 \
+    || ! command -v hsetroot >/dev/null 2>&1; then
+  sudo -n apt-get update -qq >/dev/null 2>&1 || true
+  sudo -n apt-get install -y --no-install-recommends \
+    xfwm4 picom hsetroot >/dev/null 2>&1 \
+    || echo "start-box: desktop packages unavailable" >&2
 fi
 
 if ! curl -fsS -o /dev/null "http://127.0.0.1:1340/health" \

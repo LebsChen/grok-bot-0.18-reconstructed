@@ -1820,6 +1820,24 @@ def test_start_box_stages_verified_runtime_before_replacing_live_pack():
     assert 'sudo -n chmod 0755 -- "$EXEC_DAEMON_DIRECTORY"' in script
     assert 'start-box: /exec-daemon is not accessible' in script
     assert 'sudo -n install -d -m 0755 /home/box' in script
+    # per-window box-bounded-log resolves node via /exec-daemon/node
+    assert 'NODE_BINARY="$PACK_DIR/node"' in script
+    assert 'preserving real /exec-daemon/node' in script
+    assert 'ln -sfn -- "$NODE_BINARY" "$EXEC_DAEMON_DIRECTORY/node"' in script
+    assert 'sudo -n ln -sfn -- "$NODE_BINARY" "$EXEC_DAEMON_DIRECTORY/node"' \
+        in script
+    # start-desktop.sh truncates /usr/local/bin/box-chrome via `cat >` as
+    # this user, so a writable placeholder must exist beforehand
+    assert '[ ! -w /usr/local/bin/box-chrome ]' in script
+    assert ('sudo -n install -m 0755 -o "$(id -u)" -g "$(id -g)" /dev/null \\'
+            '\n      /usr/local/bin/box-chrome' in script)
+    # per-window WM/compositor/root painter, best-effort install
+    assert 'command -v xfwm4 >/dev/null 2>&1' in script
+    assert 'command -v picom >/dev/null 2>&1' in script
+    assert 'command -v hsetroot >/dev/null 2>&1' in script
+    assert ('sudo -n apt-get install -y --no-install-recommends \\'
+            '\n    xfwm4 picom hsetroot' in script)
+    assert 'start-box: desktop packages unavailable' in script
 
 
 def test_start_box_exec_daemon_directory_explicit_mode(tmp_path):
@@ -1857,6 +1875,61 @@ def test_start_box_exec_daemon_directory_explicit_mode(tmp_path):
     result = run_fragment(stale)
     assert result.returncode == 0, result.stderr
     assert stat.S_IMODE(stale.stat().st_mode) == 0o755
+
+
+def _fake_sudo_bin(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(exist_ok=True)
+    (fake_bin / "sudo").write_text("#!/bin/sh\nshift\nexec \"$@\"\n")
+    (fake_bin / "sudo").chmod(0o755)
+    return fake_bin
+
+
+def test_start_box_links_exec_daemon_node_and_precreates_box_chrome(
+        tmp_path):
+    """Execute the /exec-daemon node link and box-chrome placeholder
+    fragments with a fake sudo and assert the results."""
+    package_dir = Path(__file__).resolve().parent.parent
+    script = (package_dir / "box" / "start-box.sh").read_text()
+    fake_bin = _fake_sudo_bin(tmp_path)
+
+    exec_dir = tmp_path / "exec-daemon"
+    exec_dir.mkdir()
+    node_target = tmp_path / "runtime" / "node"
+    node_target.parent.mkdir()
+    node_target.write_text("#!/bin/sh\n")
+    node_target.chmod(0o700)
+    fragment = script[
+        script.index('NODE_BINARY="$PACK_DIR/node"'):
+        script.index("# ── python + protobuf for box.py")]
+    fragment = fragment.replace(
+        'NODE_BINARY="$PACK_DIR/node"',
+        f'EXEC_DAEMON_DIRECTORY="{exec_dir}"\nNODE_BINARY="{node_target}"')
+    result = subprocess.run(
+        ["/usr/bin/env", "-i", f"PATH={fake_bin}:/usr/bin:/bin",
+         "bash", "-c", fragment],
+        capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert (exec_dir / "node").is_symlink()
+    assert os.readlink(exec_dir / "node") == str(node_target)
+
+    fake_usr_local_bin = tmp_path / "usr-local-bin"
+    fake_usr_local_bin.mkdir()
+    fragment = script[
+        script.index("if [ -d /usr/local/bin ] && "
+                     "[ ! -w /usr/local/bin/box-chrome ]; then"):
+        script.index("# Per-window desktops need a window manager")]
+    fragment = fragment.replace("/usr/local/bin", str(fake_usr_local_bin))
+    result = subprocess.run(
+        ["/usr/bin/env", "-i", f"PATH={fake_bin}:/usr/bin:/bin",
+         "bash", "-c", fragment],
+        capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    placeholder = fake_usr_local_bin / "box-chrome"
+    assert placeholder.is_file()
+    assert stat.S_IMODE(placeholder.stat().st_mode) == 0o755
+    # start-desktop.sh's `cat >` must succeed by truncating the file
+    placeholder.write_text("#!/usr/bin/env bash\n")
 
 
 def test_start_box_stops_owned_services_before_starting_replacements():
