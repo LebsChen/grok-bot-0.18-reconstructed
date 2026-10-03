@@ -213,14 +213,14 @@ async function withFakeComputerUseBin(callback, { failArg } = {}) {
     await writeFile(tinyWebp, Buffer.from(TINY_WEBP_BASE64, "base64"));
     await writeFile(path.join(bin, "xdotool.cmd"), [
       "@echo off",
-      `echo xdotool %*>>"${logPath}"`,
+      `echo xdotool %* >>"${logPath}"`,
       'if "%1"=="getmouselocation" (echo X=12&echo Y=34&echo SCREEN=0&echo WINDOW=1)',
       'if defined CU_FAIL_ARG if "%1"=="%CU_FAIL_ARG%" (echo boom-%1 1>&2&exit /b 1)',
       "exit /b 0",
     ].join("\r\n"));
     await writeFile(path.join(bin, "import.cmd"), [
       "@echo off",
-      `echo import %*>>"${logPath}"`,
+      `echo import %* >>"${logPath}"`,
       `type "${tinyWebp}"`,
       "exit /b 0",
     ].join("\r\n"));
