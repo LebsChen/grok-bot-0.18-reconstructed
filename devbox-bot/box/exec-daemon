@@ -72,6 +72,16 @@ daemon_entry="$pack_root/opt-sand/box-exec-daemon/main.cjs"
 
 workspace_root="$(realpath -e /workspace)" \
   || fail "/workspace is unavailable"
+if [ -z "${HOME:-}" ]; then
+  HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6 || true)"
+  [ -n "$HOME" ] || fail "could not resolve HOME"
+fi
+export HOME
+if [ -z "${USER:-}" ]; then
+  USER="$(id -un)" || fail "could not resolve USER"
+  [ -n "$USER" ] || fail "could not resolve USER"
+fi
+export USER
 data_root="${SAND_DATA_ROOT:-$HOME/.sand}"
 terminals_directory="$data_root/box-terminals-$port"
 mkdir -p -- "$terminals_directory" \

@@ -768,11 +768,19 @@ class DesktopBackend:
                     return None
         except Exception:  # noqa: BLE001
             return None
+        novnc = f"{base}/__devbox/novnc"
+        wake = "resume_lower_s=900&resume_upper_s=18000"
+        vnc_url = (
+            f"{novnc}/vnc.html?network_token={token}&{wake}&path="
+            + urllib.parse.quote(
+                f"websockify?network_token={token}&{wake}", safe=""))
         ident = self._identity(api)
         return {
             "cluster": "devbox",
             "tenant_id": ident.get("org_id") or "",
             "pod_id": session_id,
+            "vnc_url": vnc_url,
+            "fork_vnc_base_url": novnc,
             "network_token": token,
             "gateway_url": base,
             "gateway_token": box.get("gateway_token", ""),

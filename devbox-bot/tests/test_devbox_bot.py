@@ -755,6 +755,8 @@ def test_runtime_pack_includes_every_devbox_bot_module(tmp_path):
                 ("devbox_bot/stale.py", b"stale"),
                 ("opt-sand/box-exec-daemon/main.cjs", b"old daemon"),
                 ("opt-sand/exec-daemon/exec-daemon", b"old shim"),
+                ("opt-sand/sand-host/box-scripts/box-x11vnc",
+                 b"old box-x11vnc"),
                 ("opt-sand/grok-bot-box/start-box.sh", b"old start-box")):
             info = tarfile.TarInfo(name)
             info.size = len(payload)
@@ -821,6 +823,81 @@ def test_runtime_pack_includes_every_devbox_bot_module(tmp_path):
         assert start_box_members[0].mode == 0o644
         assert archive.extractfile(start_box_members[0]).read() == \
             (package_dir.parent / "box" / "start-box.sh").read_bytes()
+        box_x11vnc_members = [
+            member for member in members
+            if member.name.removeprefix("./")
+            == "opt-sand/sand-host/box-scripts/box-x11vnc"
+        ]
+        box_x11vnc_path = package_dir.parent / "box" / "box-x11vnc"
+        assert len(box_x11vnc_members) == 1
+        assert box_x11vnc_members[0].mode == 0o755
+        assert archive.extractfile(box_x11vnc_members[0]).read() == \
+            box_x11vnc_path.read_bytes()
+
+
+def test_box_x11vnc_translates_args_and_uses_xtigervnc_password_file(
+        tmp_path):
+    package_dir = Path(__file__).resolve().parent.parent
+    shim = package_dir / "box" / "box-x11vnc"
+    cmdline = tmp_path / "xtigervnc.cmdline"
+    password_file = tmp_path / "vnc.passwd"
+    password_file.write_bytes(b"stub")
+    cmdline.write_bytes(b"\0".join((
+        b"/usr/bin/Xtigervnc",
+        b":0",
+        b"-rfbport",
+        b"5901",
+        b"-PasswordFile",
+        os.fsencode(password_file),
+    )))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    capture = tmp_path / "x0vncserver-args.json"
+    server_stub = bin_dir / "x0vncserver"
+    server_stub.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "with open(os.environ['BOX_X11VNC_CAPTURE'], 'w') as stream:\n"
+        "    json.dump(sys.argv[1:], stream)\n")
+    server_stub.chmod(0o755)
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "BOX_X11VNC_TEST_CMDLINE": str(cmdline),
+        "BOX_X11VNC_CAPTURE": str(capture),
+    })
+
+    subprocess.run([
+        str(shim), "-display", ":2", "-localhost", "-nopw", "-shared",
+        "-forever", "-noxdamage", "-rfbport", "5902", "-quiet",
+    ], check=True, capture_output=True, text=True, env=env)
+
+    assert json.loads(capture.read_text()) == [
+        "-display", ":2",
+        "-rfbport", "5902",
+        "-PasswordFile", str(password_file),
+        "-localhost", "no",
+        "-SecurityTypes", "VncAuth",
+        "-AlwaysShared=1",
+    ]
+
+
+def test_box_x11vnc_fails_when_xtigervnc_password_file_is_missing(
+        tmp_path):
+    package_dir = Path(__file__).resolve().parent.parent
+    shim = package_dir / "box" / "box-x11vnc"
+    cmdline = tmp_path / "xtigervnc.cmdline"
+    cmdline.write_bytes(
+        b"\0".join((b"/usr/bin/Xtigervnc", b":0", b"-rfbport", b"5901")))
+    result = subprocess.run([
+        str(shim), "-display", ":2", "-rfbport", "5902",
+    ], check=False, capture_output=True, text=True, env={
+        **os.environ,
+        "BOX_X11VNC_TEST_CMDLINE": str(cmdline),
+    })
+    assert result.returncode != 0
+    assert "could not find a readable Xtigervnc -PasswordFile" \
+        in result.stderr
 
 
 def test_per_window_exec_daemon_shim_parses_arguments_and_sets_environment(
@@ -874,6 +951,74 @@ def test_per_window_exec_daemon_shim_parses_arguments_and_sets_environment(
     assert payload["argv"][-1] == str(daemon_entry)
     assert result.stderr.strip() == "--unexpected-option"
     assert "sensitive-value" not in result.stderr
+
+
+def test_per_window_exec_daemon_shim_resolves_missing_home_and_user(tmp_path):
+    package_dir = Path(__file__).resolve().parent.parent
+    pack = tmp_path / "pack"
+    shim_dir = pack / "opt-sand" / "exec-daemon"
+    shim_dir.mkdir(parents=True)
+    shim_path = shim_dir / "exec-daemon"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source = (package_dir / "box" / "exec-daemon").read_text()
+    source = source.replace(
+        "realpath -e /workspace", f"realpath -e '{workspace}'")
+    shim_path.write_text(source)
+    shim_path.chmod(0o755)
+
+    daemon_entry = pack / "opt-sand" / "box-exec-daemon" / "main.cjs"
+    daemon_entry.parent.mkdir(parents=True)
+    daemon_entry.write_text("void 0;\n")
+    node = pack / "node"
+    node.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os\n"
+        "print(json.dumps({"
+        "'home': os.environ.get('HOME'), "
+        "'user': os.environ.get('USER'), "
+        "'terminals': os.environ.get('SAND_BOX_TERMINALS_DIRECTORY'), "
+        "'data_root': os.environ.get('SAND_DATA_ROOT')}))\n")
+    node.chmod(0o755)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    mkdir_capture = tmp_path / "mkdir-args.json"
+    fake_mkdir = fake_bin / "mkdir"
+    fake_mkdir.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "with open(os.environ['MKDIR_CAPTURE'], 'w') as output:\n"
+        "    json.dump(sys.argv[1:], output)\n")
+    fake_mkdir.chmod(0o755)
+    passwd_home = subprocess.run(
+        ["getent", "passwd", str(os.getuid())],
+        check=True, capture_output=True, text=True,
+    ).stdout.split(":")[5]
+    passwd_user = subprocess.run(
+        ["id", "-un"], check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert passwd_home
+
+    result = subprocess.run([
+        "/usr/bin/env", "-i",
+        f"PATH={fake_bin}:/usr/bin:/bin",
+        f"MKDIR_CAPTURE={mkdir_capture}",
+        str(shim_path), "serve", "--port", "14002",
+        "--pty-websocket-port", "13602", "--auth-token", "local",
+        "--rg-path", "/exec-daemon/rg",
+    ], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert "HOME: unbound variable" not in result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["home"] == passwd_home
+    assert payload["user"] == passwd_user
+    assert payload["data_root"] is None
+    assert payload["terminals"] == (
+        Path(passwd_home) / ".sand" / "box-terminals-14002").as_posix()
+    assert json.loads(mkdir_capture.read_text()) == [
+        "-p", "--", payload["terminals"]]
 
 
 @pytest.mark.parametrize("argv", [
@@ -990,6 +1135,36 @@ def _patch_gateway(monkeypatch, backend, api):
     monkeypatch.setattr(
         "devbox_bot.desktop.PROVISION_WAIT_S", 0.01)
     return api
+
+
+def test_gateway_coords_include_relay_vnc_urls_and_serialize(
+        tmp_path, monkeypatch):
+    backend = DesktopBackend(
+        port=0, api_key="k", state_path=tmp_path / "s.json")
+    api = _patch_gateway(monkeypatch, backend, _FakeDevBoxApi())
+    coords = backend._gateway_coords(
+        api, "devin-vnc-test", {"gateway_token": "gw-token"})
+    assert coords is not None
+    novnc = "https://p-1340.example.dev/__devbox/novnc"
+    wake = "resume_lower_s=900&resume_upper_s=18000"
+    expected_url = (
+        f"{novnc}/vnc.html?network_token=cap-x&{wake}&path="
+        "websockify%3Fnetwork_token%3Dcap-x%26resume_lower_s%3D900"
+        "%26resume_upper_s%3D18000")
+    assert coords["vnc_url"] == expected_url
+    assert coords["fork_vnc_base_url"] == novnc
+
+    monkeypatch.setattr(backend, "_ensure_box", lambda _ctx: coords)
+    router = backend.router()
+    for method in ("EnsureSandBox", "EnsureSandBoxWindow"):
+        status, content_type, body = router.dispatch(
+            "aiserver.v1.GrokBotService", method,
+            "application/json", b"{}")
+        assert status == 200
+        assert content_type == "application/json"
+        response = json.loads(body)
+        assert response["vnc_url"] == expected_url
+        assert response["fork_vnc_base_url"] == novnc
 
 
 def test_ensure_sandbox_creates_session(tmp_path, monkeypatch):
@@ -1606,7 +1781,8 @@ def test_start_box_stages_verified_runtime_before_replacing_live_pack():
     shim_check = script.index(
         'BOX_EXEC_DAEMON_SHIM_STAGE="$RUNTIME_STAGE/opt-sand/exec-daemon/exec-daemon"')
     shim_syntax = script.index('bash -n "$BOX_EXEC_DAEMON_SHIM_STAGE"')
-    script_check = script.index("for required_script in start-window")
+    script_check = script.index(
+        "for required_script in start-window stop-window box-x11vnc")
     assert script.index("sand-window-router.mjs", script_check) < \
         script.index("do\n", script_check)
     router_start = script.index('exec setsid "$NODE_BIN" '

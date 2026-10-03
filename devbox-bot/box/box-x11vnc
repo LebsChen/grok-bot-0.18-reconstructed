@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -u
+
+fail() {
+  printf 'box-x11vnc: %s\n' "$*" >&2
+  exit 1
+}
+
+display=""
+port=""
+while (($#)); do
+  case "$1" in
+    -display|-rfbport)
+      option="$1"
+      shift
+      (($#)) || fail "$option requires a value"
+      if [ "$option" = "-display" ]; then
+        display="$1"
+      else
+        port="$1"
+      fi
+      shift
+      ;;
+    -localhost|-nopw|-shared|-forever|-noxdamage|-quiet)
+      shift
+      ;;
+    *)
+      fail "unsupported argument: $1"
+      ;;
+  esac
+done
+
+[ -n "$display" ] || fail "missing -display"
+[ -n "$port" ] || fail "missing -rfbport"
+
+password_file=""
+if [ -n "${BOX_X11VNC_TEST_CMDLINE:-}" ]; then
+  cmdline_files=("$BOX_X11VNC_TEST_CMDLINE")
+else
+  cmdline_files=(/proc/[0-9]*/cmdline)
+fi
+
+for cmdline_file in "${cmdline_files[@]}"; do
+  [ -r "$cmdline_file" ] || continue
+  process_args=()
+  mapfile -d '' -t process_args < "$cmdline_file" || true
+  [ "${#process_args[@]}" -gt 0 ] || continue
+  process_name="${process_args[0]##*/}"
+  case "$process_name" in
+    Xtigervnc|Xvnc) ;;
+    *) continue ;;
+  esac
+  for ((index = 1; index < ${#process_args[@]}; index++)); do
+    argument="${process_args[$index]}"
+    if [ "$argument" = "-PasswordFile" ]; then
+      next_index=$((index + 1))
+      if [ "$next_index" -lt "${#process_args[@]}" ]; then
+        password_file="${process_args[$next_index]}"
+        break
+      fi
+    elif [[ "$argument" == -PasswordFile=* ]]; then
+      password_file="${argument#-PasswordFile=}"
+      break
+    fi
+  done
+  [ -n "$password_file" ] && break
+done
+
+[ -n "$password_file" ] && [ -r "$password_file" ] \
+  || fail "could not find a readable Xtigervnc -PasswordFile"
+command -v x0vncserver >/dev/null 2>&1 \
+  || fail "x0vncserver is not installed"
+
+exec x0vncserver \
+  -display "$display" \
+  -rfbport "$port" \
+  -PasswordFile "$password_file" \
+  -localhost no \
+  -SecurityTypes VncAuth \
+  -AlwaysShared=1

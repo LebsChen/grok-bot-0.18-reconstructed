@@ -38,6 +38,11 @@ def _is_exec_daemon_shim(name: str) -> bool:
     return _archive_name(name) == "opt-sand/exec-daemon/exec-daemon"
 
 
+def _is_box_x11vnc(name: str) -> bool:
+    return _archive_name(name) == (
+        "opt-sand/sand-host/box-scripts/box-x11vnc")
+
+
 def _source_files(source: Path) -> list[Path]:
     files = [
         path for path in source.rglob("*")
@@ -141,6 +146,19 @@ def _write_exec_daemon_shim(tar: tarfile.TarFile,
     return hashlib.sha256(exec_daemon_shim.read_bytes()).hexdigest()
 
 
+def _write_box_x11vnc(tar: tarfile.TarFile, box_x11vnc: Path) -> str:
+    info = tarfile.TarInfo(
+        "opt-sand/sand-host/box-scripts/box-x11vnc")
+    info.size = box_x11vnc.stat().st_size
+    info.mode = 0o755
+    info.uid = info.gid = 0
+    info.uname = info.gname = ""
+    info.mtime = 0
+    with box_x11vnc.open("rb") as stream:
+        tar.addfile(info, stream)
+    return hashlib.sha256(box_x11vnc.read_bytes()).hexdigest()
+
+
 def repack_runtime_pack(base_pack: Path, source: Path,
                         output_pack: Path,
                         box_exec_daemon: Path) -> dict[str, str]:
@@ -166,6 +184,10 @@ def repack_runtime_pack(base_pack: Path, source: Path,
     if not exec_daemon_shim.is_file():
         raise ValueError(
             f"exec-daemon shim does not exist: {exec_daemon_shim}")
+    box_x11vnc = (
+        Path(__file__).resolve().parents[1] / "box" / "box-x11vnc")
+    if not box_x11vnc.is_file():
+        raise ValueError(f"box-x11vnc shim does not exist: {box_x11vnc}")
 
     files = _source_files(source)
     output_pack.parent.mkdir(parents=True, exist_ok=True)
@@ -187,7 +209,8 @@ def repack_runtime_pack(base_pack: Path, source: Path,
                             or _is_box_exec_daemon(member.name)
                             or _is_start_box(member.name)
                             or _is_provision(member.name)
-                            or _is_exec_daemon_shim(member.name)):
+                            or _is_exec_daemon_shim(member.name)
+                            or _is_box_x11vnc(member.name)):
                         continue
                     content = (base.extractfile(member)
                                if member.isfile() else None)
@@ -201,6 +224,7 @@ def repack_runtime_pack(base_pack: Path, source: Path,
             start_box_hash = _write_start_box(output, start_box)
             provision_hash = _write_provision(output, provision)
             shim_hash = _write_exec_daemon_shim(output, exec_daemon_shim)
+            box_x11vnc_hash = _write_box_x11vnc(output, box_x11vnc)
         os.replace(temporary, output_pack)
     finally:
         temporary.unlink(missing_ok=True)
@@ -272,6 +296,19 @@ def repack_runtime_pack(base_pack: Path, source: Path,
                 or hashlib.sha256(shim_stream.read()).hexdigest()
                 != shim_hash):
             raise ValueError("packed exec-daemon shim differs from its source")
+    with tarfile.open(output_pack, mode="r:gz") as rebuilt:
+        box_x11vnc_members = [
+            member for member in rebuilt
+            if _is_box_x11vnc(member.name) and member.isfile()
+        ]
+        if len(box_x11vnc_members) != 1:
+            raise ValueError("packed box-x11vnc shim is missing or duplicated")
+        box_x11vnc_member = box_x11vnc_members[0]
+        box_x11vnc_stream = rebuilt.extractfile(box_x11vnc_member)
+        if (box_x11vnc_member.mode != 0o755 or box_x11vnc_stream is None
+                or hashlib.sha256(box_x11vnc_stream.read()).hexdigest()
+                != box_x11vnc_hash):
+            raise ValueError("packed box-x11vnc shim differs from its source")
 
     digest = hashlib.sha256(output_pack.read_bytes()).hexdigest()
     sidecar = Path(str(output_pack) + ".sha256")

@@ -228,7 +228,8 @@ if [ ! -f "$MARKER" ]; then
     exit 1
   fi
   BOX_SCRIPTS_STAGE="$RUNTIME_STAGE/opt-sand/sand-host/box-scripts"
-  for required_script in start-window stop-window sand-window-router.mjs \
+  for required_script in start-window stop-window box-x11vnc \
+      sand-window-router.mjs \
       box-bounded-log start-desktop.sh box-chrome-policy sand-wallpaper \
       sand-wallpaper-tone.mjs; do
     if [ ! -f "$BOX_SCRIPTS_STAGE/$required_script" ]; then
