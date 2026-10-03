@@ -712,6 +712,79 @@ def test_stream_inference_logs_only_safe_request_metadata(monkeypatch, caplog):
     assert "private-key" not in caplog.text
 
 
+def test_stream_inference_truncated_without_done_emits_error(
+        monkeypatch, caplog):
+    events = [
+        {"choices": [{"delta": {"content": "hi"}, "finish_reason": ""}]},
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "call-0",
+             "function": {"name": "Read", "arguments": '{"p":'}},
+        ]}, "finish_reason": ""}]},
+    ]
+    sse = _FakeSSE([f"data: {json.dumps(event)}" for event in events])
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: sse)
+    caplog.set_level("WARNING", logger="devbox_bot.inference")
+
+    frames = list(stream_inference(
+        _inference_request("m"), "http://x", "k"))
+
+    last = frames[-1]
+    assert last.WhichOneof("response") == "error"
+    assert last.error.code == "OVERLOADED"
+    assert last.error.error_type == 7
+    assert "without finish_reason" in last.error.message
+    assert all(not part.is_complete for part in (
+        frame.tool_call_part for frame in frames
+        if frame.WhichOneof("response") == "tool_call_part"))
+    assert all(not part.is_final for part in (
+        frame.text_part for frame in frames
+        if frame.WhichOneof("response") == "text_part"))
+    assert "upstream stream truncated: done=False pending_tools=1" \
+        in caplog.text
+
+
+def test_stream_inference_done_with_pending_tool_emits_error(monkeypatch):
+    events = [
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "call-0",
+             "function": {"name": "Read", "arguments": '{"p":'}},
+        ]}, "finish_reason": ""}]},
+    ]
+    sse = _FakeSSE([f"data: {json.dumps(event)}" for event in events]
+                   + ["data: [DONE]"])
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: sse)
+
+    frames = list(stream_inference(
+        _inference_request("m"), "http://x", "k"))
+
+    last = frames[-1]
+    assert last.WhichOneof("response") == "error"
+    assert last.error.code == "OVERLOADED"
+    assert last.error.error_type == 7
+    assert "without finish_reason" in last.error.message
+    assert all(not part.is_complete for part in (
+        frame.tool_call_part for frame in frames
+        if frame.WhichOneof("response") == "tool_call_part"))
+
+
+def test_stream_inference_text_only_done_without_finish_reason_ok(
+        monkeypatch):
+    sse = _FakeSSE([
+        'data: {"choices":[{"delta":{"content":"done"},'
+        '"finish_reason":""}]}',
+        'data: [DONE]',
+    ])
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: sse)
+
+    frames = list(stream_inference(
+        _inference_request("m"), "http://x", "k"))
+
+    assert all(frame.WhichOneof("response") != "error" for frame in frames)
+
+
 def _inference_request(model_id):
     return codec_mod.codec().new(
         "aiserver.v1.InferenceStreamRequest",

@@ -204,6 +204,7 @@ def stream_inference(req, base_url: str, api_key: str,
         log_stream_end()
         return
 
+    saw_done = False
     try:
         with resp:
             for raw in resp:
@@ -212,6 +213,7 @@ def stream_inference(req, base_url: str, api_key: str,
                     continue
                 event_payload = line[5:].strip()
                 if event_payload == "[DONE]":
+                    saw_done = True
                     break
                 try:
                     event = json.loads(event_payload)
@@ -292,5 +294,15 @@ def stream_inference(req, base_url: str, api_key: str,
         yield frame(error={
             "message": f"upstream unreachable: {exc}",
             "code": "OVERLOADED", "error_type": 7})
+    else:
+        pending = sum(
+            1 for state in tool_state.values() if not state["completed"])
+        if finish_reason is None and (not saw_done or pending):
+            log.warning(
+                "upstream stream truncated: done=%s pending_tools=%d",
+                saw_done, pending)
+            yield frame(error={
+                "message": "upstream stream ended without finish_reason",
+                "code": "OVERLOADED", "error_type": 7})
     finally:
         log_stream_end()
