@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -32,7 +33,9 @@ START_BOX_RETRY_S = 10
 ALLOWED_KEYS = frozenset({
     "GROKBOT_GATEWAY_TOKEN",
     "GROKBOT_INFERENCE_CREDENTIAL",
+    "GROKBOT_SHARE_CREDENTIAL",
     "GROKBOT_RUNTIME_URL",
+    "DEVBOX_WEBAPP_ORIGIN",
     "GROKBOT_LLM_BASE_URL",
     "GROKBOT_LLM_API_KEY",
     "GROKBOT_LLM_MODEL",
@@ -97,7 +100,7 @@ def _read_creds() -> dict[str, str]:
     return values
 
 
-def _launch_start_box() -> subprocess.Popen | None:
+def _launch_start_box(*, force_restart: bool = False) -> subprocess.Popen | None:
     if not START_BOX.is_file():
         return None
     LOG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -106,12 +109,14 @@ def _launch_start_box() -> subprocess.Popen | None:
     os.chmod(START_LOG, 0o600)
     command = (
         'set -a; . "$1"; set +a; '
+        'if [ "$3" = 1 ]; then export GROKBOT_FORCE_RESTART_RUNTIME=1; fi; '
         'exec setsid bash "$2"'
     )
     try:
         return subprocess.Popen(
             ["bash", "-c", command, "grok-bot-provision",
-             str(CREDS), str(START_BOX)],
+             str(CREDS), str(START_BOX),
+             "1" if force_restart else "0"],
             stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -120,6 +125,25 @@ def _launch_start_box() -> subprocess.Popen | None:
     except OSError:
         log_file.close()
         raise
+
+
+def _replace_creds(values: dict[str, str]) -> None:
+    GB_HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(GB_HOME, 0o700)
+    fd, temporary = tempfile.mkstemp(
+        dir=str(GB_HOME), prefix=".creds-update-")
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as stream:
+            for key, value in values.items():
+                stream.write(f"{key}={shlex.quote(value)}\n")
+        os.replace(temporary, CREDS)
+        os.chmod(CREDS, 0o600)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def _resume_or_exit() -> int | None:
@@ -241,12 +265,26 @@ class ProvisionServer(ThreadingHTTPServer):
         self.start_box_retry_at: float | None = None
         self.start_box_failed = False
 
-    def launch_start_box(self):
+    def launch_start_box(self, *, force_restart: bool = False):
         with self.start_box_lock:
-            if (self.start_box_process is not None
-                    or self.start_box_attempts >= START_BOX_MAX_ATTEMPTS):
+            if self.start_box_process is not None:
+                exit_code = self.start_box_process.poll()
+                if exit_code is None:
+                    return None
+                proc = self.start_box_process
+                self.start_box_process = None
+                self.start_box_exit_code = proc.wait()
+                pidfile = GB_HOME / "start-box.pid"
+                if _pid_from(pidfile) == proc.pid:
+                    pidfile.unlink(missing_ok=True)
+            if force_restart:
+                self.start_box_attempts = 0
+                self.start_box_exit_code = None
+                self.start_box_retry_at = None
+                self.start_box_failed = False
+            if self.start_box_attempts >= START_BOX_MAX_ATTEMPTS:
                 return self.start_box_process
-            proc = _launch_start_box()
+            proc = _launch_start_box(force_restart=force_restart)
             if proc is not None:
                 self.start_box_attempts += 1
                 self.start_box_process = proc
@@ -313,11 +351,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not_found"})
 
     def do_POST(self):
-        if self.path.split("?", 1)[0] != "/provision":
+        path = self.path.split("?", 1)[0]
+        if path not in {"/provision", "/provision/update"}:
             self._json(404, {"error": "not_found"})
             return
         with self.server.lock:
-            if self.server.accepted or CREDS.exists():
+            updating = path == "/provision/update"
+            if updating and (not self.server.accepted or not CREDS.exists()):
+                self._json(409, {"error": "not_provisioned"})
+                return
+            if not updating and (self.server.accepted or CREDS.exists()):
                 self._json(409, {"error": "already_provisioned"})
                 return
             try:
@@ -345,6 +388,48 @@ class Handler(BaseHTTPRequestHandler):
             if any(not isinstance(v, str) or "\n" in v or "\r" in v
                    for v in body.values()):
                 self._json(400, {"error": "string_values_required"})
+                return
+            if updating:
+                if not body.get("GROKBOT_SHARE_CREDENTIAL"):
+                    self._json(400, {"error": "share_credential_required"})
+                    return
+                with self.server.start_box_lock:
+                    active = self.server.start_box_process
+                    if active is not None and active.poll() is None:
+                        self._json(409, {"error": "startup_in_progress"})
+                        return
+                    previous = _read_creds()
+                    try:
+                        old_user = json.loads(
+                            previous.get("GROKBOT_USER_JSON", "{}"))
+                        new_user = json.loads(
+                            body.get("GROKBOT_USER_JSON", "{}"))
+                    except (TypeError, ValueError):
+                        self._json(400, {"error": "invalid_user_identity"})
+                        return
+                    if (not isinstance(old_user, dict)
+                            or not isinstance(new_user, dict)
+                            or old_user.get("user_id")
+                            != new_user.get("user_id")):
+                        self._json(403, {"error": "identity_mismatch"})
+                        return
+                    merged = {**previous, **body}
+                    try:
+                        _replace_creds(merged)
+                        proc = self.server.launch_start_box(
+                            force_restart=True)
+                    except OSError:
+                        _replace_creds(previous)
+                        self._json(503, {"error": "start_failed"})
+                        return
+                    if proc is None:
+                        _replace_creds(previous)
+                        self._json(409, {"error": "startup_in_progress"})
+                        return
+                self._json(202, {
+                    "state": "updating",
+                    "startBoxAttempts": self.server.start_box_attempts,
+                })
                 return
             GB_HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
             os.chmod(GB_HOME, 0o700)

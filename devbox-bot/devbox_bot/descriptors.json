@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-01T15:21:20.665Z",
+ "generated": "2026-10-02T10:29:15.814Z",
  "services": [
   {
    "typeName": "aiserver.v1.AiService",
@@ -5027,6 +5027,41 @@
      "kind": 0,
      "input": "aiserver.v1.DownloadIssueTracesRequest",
      "output": "aiserver.v1.DownloadIssueTracesResponse"
+    }
+   }
+  },
+  {
+   "typeName": "aiserver.v1.AutomationsService",
+   "methods": {
+    "createSandAutomation": {
+     "name": "CreateSandAutomation",
+     "kind": 0,
+     "input": "aiserver.v1.CreateAutomationRequest",
+     "output": "aiserver.v1.CreateAutomationResponse"
+    },
+    "listSandAutomations": {
+     "name": "ListSandAutomations",
+     "kind": 0,
+     "input": "aiserver.v1.ListSandAutomationsRequest",
+     "output": "aiserver.v1.ListAutomationsResponse"
+    },
+    "getSandAutomation": {
+     "name": "GetSandAutomation",
+     "kind": 0,
+     "input": "aiserver.v1.GetAutomationRequest",
+     "output": "aiserver.v1.GetAutomationResponse"
+    },
+    "updateSandAutomation": {
+     "name": "UpdateSandAutomation",
+     "kind": 0,
+     "input": "aiserver.v1.UpdateAutomationRequest",
+     "output": "aiserver.v1.UpdateAutomationResponse"
+    },
+    "deleteSandAutomation": {
+     "name": "DeleteSandAutomation",
+     "kind": 0,
+     "input": "aiserver.v1.DeleteAutomationRequest",
+     "output": "aiserver.v1.DeleteAutomationResponse"
     }
    }
   },
@@ -60336,6 +60371,384 @@
     }
    ]
   },
+  "aiserver.v1.CreateAutomationRequest": {
+   "typeName": "aiserver.v1.CreateAutomationRequest",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "name",
+     "localName": "name",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "workflow",
+     "localName": "workflow",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.Workflow"
+    },
+    {
+     "no": 3,
+     "name": "description",
+     "localName": "description",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 4,
+     "name": "scope",
+     "localName": "scope",
+     "kind": "enum",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationScope"
+    },
+    {
+     "no": 5,
+     "name": "template_id",
+     "localName": "templateId",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 6,
+     "name": "managed_type",
+     "localName": "managedType",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 7,
+     "name": "hidden",
+     "localName": "hidden",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 8,
+     "name": "team_id",
+     "localName": "teamId",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "int32"
+    },
+    {
+     "no": 9,
+     "name": "creation_source",
+     "localName": "creationSource",
+     "kind": "enum",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationCreationSource"
+    },
+    {
+     "no": 10,
+     "name": "enabled",
+     "localName": "enabled",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 11,
+     "name": "sand_agent_id",
+     "localName": "sandAgentId",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 12,
+     "name": "sand_automation_id",
+     "localName": "sandAutomationId",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.CreateAutomationResponse": {
+   "typeName": "aiserver.v1.CreateAutomationResponse",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "workflow",
+     "localName": "workflow",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationWithOwner"
+    }
+   ]
+  },
+  "aiserver.v1.ListSandAutomationsRequest": {
+   "typeName": "aiserver.v1.ListSandAutomationsRequest",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "sand_agent_id",
+     "localName": "sandAgentId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.ListAutomationsResponse": {
+   "typeName": "aiserver.v1.ListAutomationsResponse",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "workflows",
+     "localName": "workflows",
+     "kind": "message",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationWithOwner"
+    }
+   ]
+  },
+  "aiserver.v1.GetAutomationRequest": {
+   "typeName": "aiserver.v1.GetAutomationRequest",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 2,
+     "name": "automation_id",
+     "localName": "automationId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "team_id",
+     "localName": "teamId",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "int32"
+    }
+   ]
+  },
+  "aiserver.v1.GetAutomationResponse": {
+   "typeName": "aiserver.v1.GetAutomationResponse",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "workflow",
+     "localName": "workflow",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "result",
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationWithOwner"
+    },
+    {
+     "no": 2,
+     "name": "restricted_summary",
+     "localName": "restrictedSummary",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "result",
+     "fieldKind": null,
+     "T": "aiserver.v1.RestrictedAutomationSummary"
+    }
+   ]
+  },
+  "aiserver.v1.UpdateAutomationRequest": {
+   "typeName": "aiserver.v1.UpdateAutomationRequest",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 2,
+     "name": "name",
+     "localName": "name",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "workflow",
+     "localName": "workflow",
+     "kind": "message",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.Workflow"
+    },
+    {
+     "no": 4,
+     "name": "enabled",
+     "localName": "enabled",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 5,
+     "name": "description",
+     "localName": "description",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 6,
+     "name": "automation_id",
+     "localName": "automationId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 7,
+     "name": "scope",
+     "localName": "scope",
+     "kind": "enum",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationScope"
+    },
+    {
+     "no": 8,
+     "name": "managed_type",
+     "localName": "managedType",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 9,
+     "name": "hidden",
+     "localName": "hidden",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.UpdateAutomationResponse": {
+   "typeName": "aiserver.v1.UpdateAutomationResponse",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "workflow",
+     "localName": "workflow",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationWithOwner"
+    }
+   ]
+  },
+  "aiserver.v1.DeleteAutomationRequest": {
+   "typeName": "aiserver.v1.DeleteAutomationRequest",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 2,
+     "name": "automation_id",
+     "localName": "automationId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.DeleteAutomationResponse": {
+   "typeName": "aiserver.v1.DeleteAutomationResponse",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
   "agent.v1.AgentClientMessage": {
    "typeName": "agent.v1.AgentClientMessage",
    "file": "agent/v1/agent_service_pb.proto",
@@ -93815,6 +94228,255 @@
     }
    ]
   },
+  "aiserver.v1.Workflow": {
+   "typeName": "aiserver.v1.Workflow",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 10,
+     "name": "triggers",
+     "localName": "triggers",
+     "kind": "message",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.Trigger"
+    },
+    {
+     "no": 11,
+     "name": "actions",
+     "localName": "actions",
+     "kind": "message",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.Action"
+    },
+    {
+     "no": 3,
+     "name": "prompts",
+     "localName": "prompts",
+     "kind": "message",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.Prompt"
+    },
+    {
+     "no": 8,
+     "name": "model",
+     "localName": "model",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 12,
+     "name": "git_config",
+     "localName": "gitConfig",
+     "kind": "message",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.GitConfig"
+    },
+    {
+     "no": 13,
+     "name": "agent_options",
+     "localName": "agentOptions",
+     "kind": "message",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AgentOptions"
+    },
+    {
+     "no": 14,
+     "name": "memory_enabled",
+     "localName": "memoryEnabled",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 15,
+     "name": "slack_notified_channels",
+     "localName": "slackNotifiedChannels",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 16,
+     "name": "slack_completion_reaction_mode",
+     "localName": "slackCompletionReactionMode",
+     "kind": "enum",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.SlackCompletionReactionMode"
+    },
+    {
+     "no": 17,
+     "name": "slack_completion_reaction_custom_emoji",
+     "localName": "slackCompletionReactionCustomEmoji",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 18,
+     "name": "managed_config",
+     "localName": "managedConfig",
+     "kind": "message",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "google.protobuf.Struct"
+    },
+    {
+     "no": 19,
+     "name": "disabled_default_tools",
+     "localName": "disabledDefaultTools",
+     "kind": "enum",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationDefaultTool"
+    }
+   ]
+  },
+  "aiserver.v1.AutomationWithOwner": {
+   "typeName": "aiserver.v1.AutomationWithOwner",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "workflow",
+     "localName": "workflow",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.Automation"
+    },
+    {
+     "no": 2,
+     "name": "user_id",
+     "localName": "userId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "int32"
+    },
+    {
+     "no": 3,
+     "name": "owner_name",
+     "localName": "ownerName",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 4,
+     "name": "mcp_auth_states",
+     "localName": "mcpAuthStates",
+     "kind": "message",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationMcpAuthState"
+    },
+    {
+     "no": 5,
+     "name": "team_id",
+     "localName": "teamId",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "int32"
+    }
+   ]
+  },
+  "aiserver.v1.RestrictedAutomationSummary": {
+   "typeName": "aiserver.v1.RestrictedAutomationSummary",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "automation_id",
+     "localName": "automationId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "name",
+     "localName": "name",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "enabled",
+     "localName": "enabled",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 4,
+     "name": "owner_name",
+     "localName": "ownerName",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
   "agent.v1.AgentRunRequest": {
    "typeName": "agent.v1.AgentRunRequest",
    "file": "agent/v1/agent_pb.proto",
@@ -115307,6 +115969,664 @@
     }
    ]
   },
+  "aiserver.v1.Trigger": {
+   "typeName": "aiserver.v1.Trigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "cron",
+     "localName": "cron",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.CronTrigger"
+    },
+    {
+     "no": 2,
+     "name": "git",
+     "localName": "git",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitTrigger"
+    },
+    {
+     "no": 7,
+     "name": "slack_trigger",
+     "localName": "slackTrigger",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.SlackTrigger"
+    },
+    {
+     "no": 9,
+     "name": "linear",
+     "localName": "linear",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.LinearTrigger"
+    },
+    {
+     "no": 11,
+     "name": "webhook",
+     "localName": "webhook",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.WebhookTrigger"
+    },
+    {
+     "no": 12,
+     "name": "slack_channel_created",
+     "localName": "slackChannelCreated",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.SlackChannelCreatedTrigger"
+    },
+    {
+     "no": 13,
+     "name": "pagerduty",
+     "localName": "pagerduty",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.PagerDutyTrigger"
+    },
+    {
+     "no": 15,
+     "name": "sentry",
+     "localName": "sentry",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.SentryTrigger"
+    },
+    {
+     "no": 16,
+     "name": "microsoft_teams_trigger",
+     "localName": "microsoftTeamsTrigger",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.MicrosoftTeamsTrigger"
+    },
+    {
+     "no": 17,
+     "name": "microsoft_teams_channel_created",
+     "localName": "microsoftTeamsChannelCreated",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.MicrosoftTeamsChannelCreatedTrigger"
+    },
+    {
+     "no": 18,
+     "name": "slack_reaction_added",
+     "localName": "slackReactionAdded",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.SlackReactionAddedTrigger"
+    },
+    {
+     "no": 19,
+     "name": "slack_mention",
+     "localName": "slackMention",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.SlackMentionTrigger"
+    },
+    {
+     "no": 20,
+     "name": "slack_any_reaction_added",
+     "localName": "slackAnyReactionAdded",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "trigger",
+     "fieldKind": null,
+     "T": "aiserver.v1.SlackAnyReactionAddedTrigger"
+    },
+    {
+     "no": 14,
+     "name": "agentic_filter_prompt",
+     "localName": "agenticFilterPrompt",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.Action": {
+   "typeName": "aiserver.v1.Action",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 4,
+     "name": "git_pr",
+     "localName": "gitPr",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitPrAction"
+    },
+    {
+     "no": 5,
+     "name": "pr_comment",
+     "localName": "prComment",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.PrCommentAction"
+    },
+    {
+     "no": 6,
+     "name": "slack",
+     "localName": "slack",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.SlackAction"
+    },
+    {
+     "no": 7,
+     "name": "mcp",
+     "localName": "mcp",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.McpAction"
+    },
+    {
+     "no": 8,
+     "name": "manage_check_run",
+     "localName": "manageCheckRun",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.ManageCheckRunAction"
+    },
+    {
+     "no": 9,
+     "name": "request_reviewers",
+     "localName": "requestReviewers",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.RequestReviewersAction"
+    },
+    {
+     "no": 10,
+     "name": "read_slack",
+     "localName": "readSlack",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.ReadSlackAction"
+    },
+    {
+     "no": 11,
+     "name": "approve_pr",
+     "localName": "approvePr",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.ApprovePrAction"
+    },
+    {
+     "no": 12,
+     "name": "resolve_review_threads",
+     "localName": "resolveReviewThreads",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.ResolveReviewThreadsAction"
+    },
+    {
+     "no": 13,
+     "name": "microsoft_teams",
+     "localName": "microsoftTeams",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.MicrosoftTeamsAction"
+    },
+    {
+     "no": 14,
+     "name": "read_microsoft_teams",
+     "localName": "readMicrosoftTeams",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "action",
+     "fieldKind": null,
+     "T": "aiserver.v1.ReadMicrosoftTeamsAction"
+    }
+   ]
+  },
+  "aiserver.v1.Prompt": {
+   "typeName": "aiserver.v1.Prompt",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "prompt",
+     "localName": "prompt",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "effort_level",
+     "localName": "effortLevel",
+     "kind": "enum",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.PromptEffortLevel"
+    },
+    {
+     "no": 3,
+     "name": "model",
+     "localName": "model",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 4,
+     "name": "is_filter",
+     "localName": "isFilter",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 5,
+     "name": "run_mode",
+     "localName": "runMode",
+     "kind": "enum",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.PromptRunMode"
+    },
+    {
+     "no": 6,
+     "name": "suppress_slack_reaction",
+     "localName": "suppressSlackReaction",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.GitConfig": {
+   "typeName": "aiserver.v1.GitConfig",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 3,
+     "name": "repo",
+     "localName": "repo",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 4,
+     "name": "branch",
+     "localName": "branch",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 5,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.AgentOptions": {
+   "typeName": "aiserver.v1.AgentOptions",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "skip_install",
+     "localName": "skipInstall",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 2,
+     "name": "private_worker",
+     "localName": "privateWorker",
+     "kind": "message",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AgentPrivateWorkerConfig"
+    },
+    {
+     "no": 3,
+     "name": "environment_public_id",
+     "localName": "environmentPublicId",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.Automation": {
+   "typeName": "aiserver.v1.Automation",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 2,
+     "name": "name",
+     "localName": "name",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "enabled",
+     "localName": "enabled",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 4,
+     "name": "workflow",
+     "localName": "workflow",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.Workflow"
+    },
+    {
+     "no": 5,
+     "name": "created_at",
+     "localName": "createdAt",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "int64"
+    },
+    {
+     "no": 6,
+     "name": "updated_at",
+     "localName": "updatedAt",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "int64"
+    },
+    {
+     "no": 7,
+     "name": "description",
+     "localName": "description",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 8,
+     "name": "automation_id",
+     "localName": "automationId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 9,
+     "name": "scope",
+     "localName": "scope",
+     "kind": "enum",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationScope"
+    },
+    {
+     "no": 10,
+     "name": "service_account_id",
+     "localName": "serviceAccountId",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 11,
+     "name": "managed_by",
+     "localName": "managedBy",
+     "kind": "enum",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AutomationManagedBy"
+    },
+    {
+     "no": 12,
+     "name": "deploy_key",
+     "localName": "deployKey",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 13,
+     "name": "deploy_last_applied_at",
+     "localName": "deployLastAppliedAt",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "int64"
+    },
+    {
+     "no": 14,
+     "name": "deploy_last_apply_error",
+     "localName": "deployLastApplyError",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 15,
+     "name": "managed_type",
+     "localName": "managedType",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 16,
+     "name": "hidden",
+     "localName": "hidden",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 17,
+     "name": "template_id",
+     "localName": "templateId",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.AutomationMcpAuthState": {
+   "typeName": "aiserver.v1.AutomationMcpAuthState",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "server_id",
+     "localName": "serverId",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "int64"
+    },
+    {
+     "no": 2,
+     "name": "server_name",
+     "localName": "serverName",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "auth_state",
+     "localName": "authState",
+     "kind": "enum",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.McpAuthState"
+    }
+   ]
+  },
   "agent.v1.McpTools": {
    "typeName": "agent.v1.McpTools",
    "file": "agent/v1/mcp_pb.proto",
@@ -130250,6 +131570,1051 @@
      "oneof": null,
      "fieldKind": null,
      "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.CronTrigger": {
+   "typeName": "aiserver.v1.CronTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "cron",
+     "localName": "cron",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.GitTrigger": {
+   "typeName": "aiserver.v1.GitTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "pull_request",
+     "localName": "pullRequest",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitPullRequestEvent"
+    },
+    {
+     "no": 2,
+     "name": "push",
+     "localName": "push",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitPushEvent"
+    },
+    {
+     "no": 4,
+     "name": "ci_completed",
+     "localName": "ciCompleted",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitCICompletedEvent"
+    },
+    {
+     "no": 5,
+     "name": "issue_labeled",
+     "localName": "issueLabeled",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitIssueLabeledEvent"
+    },
+    {
+     "no": 6,
+     "name": "label",
+     "localName": "label",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitLabelEvent"
+    },
+    {
+     "no": 7,
+     "name": "issue_comment",
+     "localName": "issueComment",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitIssueCommentEvent"
+    },
+    {
+     "no": 8,
+     "name": "pull_request_review_comment",
+     "localName": "pullRequestReviewComment",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitPullRequestReviewCommentEvent"
+    },
+    {
+     "no": 9,
+     "name": "pull_request_review",
+     "localName": "pullRequestReview",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitPullRequestReviewEvent"
+    },
+    {
+     "no": 10,
+     "name": "review_thread",
+     "localName": "reviewThread",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitReviewThreadEvent"
+    },
+    {
+     "no": 11,
+     "name": "workflow_run",
+     "localName": "workflowRun",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitWorkflowRunEvent"
+    },
+    {
+     "no": 12,
+     "name": "pull_request_review_requested",
+     "localName": "pullRequestReviewRequested",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitPullRequestReviewRequestedEvent"
+    },
+    {
+     "no": 13,
+     "name": "issue_assigned",
+     "localName": "issueAssigned",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.GitIssueAssignedEvent"
+    },
+    {
+     "no": 3,
+     "name": "user_allowlist",
+     "localName": "userAllowlist",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.SlackTrigger": {
+   "typeName": "aiserver.v1.SlackTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "channel",
+     "localName": "channel",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "message_contains",
+     "localName": "messageContains",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 4,
+     "name": "message_contains_is_regex",
+     "localName": "messageContainsIsRegex",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 5,
+     "name": "channels",
+     "localName": "channels",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 6,
+     "name": "block_unauthenticated_slack_users",
+     "localName": "blockUnauthenticatedSlackUsers",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 7,
+     "name": "slack_completion_reaction_mode",
+     "localName": "slackCompletionReactionMode",
+     "kind": "enum",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.SlackCompletionReactionMode"
+    },
+    {
+     "no": 8,
+     "name": "slack_completion_reaction_custom_emoji",
+     "localName": "slackCompletionReactionCustomEmoji",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 9,
+     "name": "top_level_only",
+     "localName": "topLevelOnly",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.LinearTrigger": {
+   "typeName": "aiserver.v1.LinearTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "issue_created",
+     "localName": "issueCreated",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.LinearIssueCreatedEvent"
+    },
+    {
+     "no": 2,
+     "name": "status_changed",
+     "localName": "statusChanged",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.LinearStatusChangedEvent"
+    },
+    {
+     "no": 3,
+     "name": "end_of_cycle",
+     "localName": "endOfCycle",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.LinearEndOfCycleEvent"
+    },
+    {
+     "no": 4,
+     "name": "project_ids",
+     "localName": "projectIds",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 6,
+     "name": "team_ids",
+     "localName": "teamIds",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.WebhookTrigger": {
+   "typeName": "aiserver.v1.WebhookTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.SlackChannelCreatedTrigger": {
+   "typeName": "aiserver.v1.SlackChannelCreatedTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "channel_name_contains",
+     "localName": "channelNameContains",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.PagerDutyTrigger": {
+   "typeName": "aiserver.v1.PagerDutyTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "incident_triggered",
+     "localName": "incidentTriggered",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.PagerDutyIncidentTriggeredEvent"
+    },
+    {
+     "no": 2,
+     "name": "incident_acknowledged",
+     "localName": "incidentAcknowledged",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.PagerDutyIncidentAcknowledgedEvent"
+    },
+    {
+     "no": 3,
+     "name": "incident_resolved",
+     "localName": "incidentResolved",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.PagerDutyIncidentResolvedEvent"
+    },
+    {
+     "no": 4,
+     "name": "incident_escalated",
+     "localName": "incidentEscalated",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.PagerDutyIncidentEscalatedEvent"
+    },
+    {
+     "no": 5,
+     "name": "incident_any",
+     "localName": "incidentAny",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.PagerDutyIncidentAnyEvent"
+    },
+    {
+     "no": 6,
+     "name": "service_ids",
+     "localName": "serviceIds",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.SentryTrigger": {
+   "typeName": "aiserver.v1.SentryTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "issue_created",
+     "localName": "issueCreated",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.SentryIssueCreatedEvent"
+    },
+    {
+     "no": 2,
+     "name": "issue_resolved",
+     "localName": "issueResolved",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.SentryIssueResolvedEvent"
+    },
+    {
+     "no": 3,
+     "name": "issue_assigned",
+     "localName": "issueAssigned",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.SentryIssueAssignedEvent"
+    },
+    {
+     "no": 4,
+     "name": "issue_archived",
+     "localName": "issueArchived",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.SentryIssueArchivedEvent"
+    },
+    {
+     "no": 5,
+     "name": "issue_unresolved",
+     "localName": "issueUnresolved",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.SentryIssueUnresolvedEvent"
+    },
+    {
+     "no": 6,
+     "name": "issue_any",
+     "localName": "issueAny",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": "event",
+     "fieldKind": null,
+     "T": "aiserver.v1.SentryIssueAnyEvent"
+    },
+    {
+     "no": 7,
+     "name": "project_ids",
+     "localName": "projectIds",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.MicrosoftTeamsTrigger": {
+   "typeName": "aiserver.v1.MicrosoftTeamsTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "tenant_id",
+     "localName": "tenantId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "team_id",
+     "localName": "teamId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "team_ids",
+     "localName": "teamIds",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 4,
+     "name": "channel_ids",
+     "localName": "channelIds",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 5,
+     "name": "message_contains",
+     "localName": "messageContains",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 6,
+     "name": "message_contains_is_regex",
+     "localName": "messageContainsIsRegex",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 7,
+     "name": "block_unauthenticated_teams_users",
+     "localName": "blockUnauthenticatedTeamsUsers",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.MicrosoftTeamsChannelCreatedTrigger": {
+   "typeName": "aiserver.v1.MicrosoftTeamsChannelCreatedTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "tenant_id",
+     "localName": "tenantId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "team_ids",
+     "localName": "teamIds",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "channel_name_contains",
+     "localName": "channelNameContains",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.SlackReactionAddedTrigger": {
+   "typeName": "aiserver.v1.SlackReactionAddedTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "channel",
+     "localName": "channel",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "emoji_name",
+     "localName": "emojiName",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 5,
+     "name": "channels",
+     "localName": "channels",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 6,
+     "name": "block_unauthenticated_slack_users",
+     "localName": "blockUnauthenticatedSlackUsers",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 9,
+     "name": "only_owner_reactions",
+     "localName": "onlyOwnerReactions",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.SlackMentionTrigger": {
+   "typeName": "aiserver.v1.SlackMentionTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "channel",
+     "localName": "channel",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "channels",
+     "localName": "channels",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "block_unauthenticated_slack_users",
+     "localName": "blockUnauthenticatedSlackUsers",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.SlackAnyReactionAddedTrigger": {
+   "typeName": "aiserver.v1.SlackAnyReactionAddedTrigger",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "channel",
+     "localName": "channel",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "channels",
+     "localName": "channels",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "block_unauthenticated_slack_users",
+     "localName": "blockUnauthenticatedSlackUsers",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 4,
+     "name": "only_owner_reactions",
+     "localName": "onlyOwnerReactions",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.GitPrAction": {
+   "typeName": "aiserver.v1.GitPrAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.PrCommentAction": {
+   "typeName": "aiserver.v1.PrCommentAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "minimize_previous_comments",
+     "localName": "minimizePreviousComments",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 2,
+     "name": "allow_inline_comments",
+     "localName": "allowInlineComments",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 3,
+     "name": "resolve_stale_threads",
+     "localName": "resolveStaleThreads",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 4,
+     "name": "allow_approve",
+     "localName": "allowApprove",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.SlackAction": {
+   "typeName": "aiserver.v1.SlackAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "channel",
+     "localName": "channel",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "generalized",
+     "localName": "generalized",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 3,
+     "name": "respond_in_thread",
+     "localName": "respondInThread",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 4,
+     "name": "post_as_thread",
+     "localName": "postAsThread",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 5,
+     "name": "channels",
+     "localName": "channels",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.McpAction": {
+   "typeName": "aiserver.v1.McpAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "server",
+     "localName": "server",
+     "kind": "message",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.McpServerConfig"
+    }
+   ]
+  },
+  "aiserver.v1.ManageCheckRunAction": {
+   "typeName": "aiserver.v1.ManageCheckRunAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "deterministic",
+     "localName": "deterministic",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.RequestReviewersAction": {
+   "typeName": "aiserver.v1.RequestReviewersAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.ReadSlackAction": {
+   "typeName": "aiserver.v1.ReadSlackAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.ApprovePrAction": {
+   "typeName": "aiserver.v1.ApprovePrAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.ResolveReviewThreadsAction": {
+   "typeName": "aiserver.v1.ResolveReviewThreadsAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.MicrosoftTeamsAction": {
+   "typeName": "aiserver.v1.MicrosoftTeamsAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "tenant_id",
+     "localName": "tenantId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "team_id",
+     "localName": "teamId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "channel_id",
+     "localName": "channelId",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 4,
+     "name": "channel_ids",
+     "localName": "channelIds",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 5,
+     "name": "generalized",
+     "localName": "generalized",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 6,
+     "name": "respond_in_thread",
+     "localName": "respondInThread",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 7,
+     "name": "post_as_thread",
+     "localName": "postAsThread",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.ReadMicrosoftTeamsAction": {
+   "typeName": "aiserver.v1.ReadMicrosoftTeamsAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.AgentPrivateWorkerConfig": {
+   "typeName": "aiserver.v1.AgentPrivateWorkerConfig",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "labels",
+     "localName": "labels",
+     "kind": "message",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.AgentPrivateWorkerLabel"
     }
    ]
   },
@@ -145495,6 +147860,745 @@
      "oneof": null,
      "fieldKind": null,
      "T": "aiserver.v1.InferenceCursorOptions"
+    }
+   ]
+  },
+  "aiserver.v1.GitPullRequestEvent": {
+   "typeName": "aiserver.v1.GitPullRequestEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repo",
+     "localName": "repo",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "ignore_draft_prs",
+     "localName": "ignoreDraftPrs",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 4,
+     "name": "only_once",
+     "localName": "onlyOnce",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 5,
+     "name": "pr_action",
+     "localName": "prAction",
+     "kind": "enum",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.GitPullRequestAction"
+    },
+    {
+     "no": 6,
+     "name": "commenter_allowlist",
+     "localName": "commenterAllowlist",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 7,
+     "name": "comment_contains",
+     "localName": "commentContains",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 10,
+     "name": "comment_contains_is_regex",
+     "localName": "commentContainsIsRegex",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 8,
+     "name": "label_name",
+     "localName": "labelName",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 9,
+     "name": "orgs",
+     "localName": "orgs",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.GitPushEvent": {
+   "typeName": "aiserver.v1.GitPushEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repo",
+     "localName": "repo",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "branch",
+     "localName": "branch",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.GitCICompletedEvent": {
+   "typeName": "aiserver.v1.GitCICompletedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "condition",
+     "localName": "condition",
+     "kind": "enum",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.GitCICompletionCondition"
+    },
+    {
+     "no": 3,
+     "name": "ignore_base_failures",
+     "localName": "ignoreBaseFailures",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 4,
+     "name": "branch",
+     "localName": "branch",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.GitIssueLabeledEvent": {
+   "typeName": "aiserver.v1.GitIssueLabeledEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "label_name",
+     "localName": "labelName",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "unlabeled",
+     "localName": "unlabeled",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.GitLabelEvent": {
+   "typeName": "aiserver.v1.GitLabelEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "label_name",
+     "localName": "labelName",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "on_added",
+     "localName": "onAdded",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 4,
+     "name": "on_removed",
+     "localName": "onRemoved",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 5,
+     "name": "pull_requests",
+     "localName": "pullRequests",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 6,
+     "name": "issues",
+     "localName": "issues",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.GitIssueCommentEvent": {
+   "typeName": "aiserver.v1.GitIssueCommentEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "commenter_allowlist",
+     "localName": "commenterAllowlist",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "comment_contains",
+     "localName": "commentContains",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 4,
+     "name": "comment_contains_is_regex",
+     "localName": "commentContainsIsRegex",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.GitPullRequestReviewCommentEvent": {
+   "typeName": "aiserver.v1.GitPullRequestReviewCommentEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "commenter_allowlist",
+     "localName": "commenterAllowlist",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "comment_contains",
+     "localName": "commentContains",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 4,
+     "name": "comment_contains_is_regex",
+     "localName": "commentContainsIsRegex",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.GitPullRequestReviewEvent": {
+   "typeName": "aiserver.v1.GitPullRequestReviewEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "on_approved",
+     "localName": "onApproved",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 3,
+     "name": "on_changes_requested",
+     "localName": "onChangesRequested",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 4,
+     "name": "on_commented",
+     "localName": "onCommented",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.GitReviewThreadEvent": {
+   "typeName": "aiserver.v1.GitReviewThreadEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "on_resolved",
+     "localName": "onResolved",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    },
+    {
+     "no": 3,
+     "name": "on_unresolved",
+     "localName": "onUnresolved",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "bool"
+    }
+   ]
+  },
+  "aiserver.v1.GitWorkflowRunEvent": {
+   "typeName": "aiserver.v1.GitWorkflowRunEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "workflow_names",
+     "localName": "workflowNames",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 3,
+     "name": "branch",
+     "localName": "branch",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 4,
+     "name": "conclusion",
+     "localName": "conclusion",
+     "kind": "enum",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "aiserver.v1.GitWorkflowRunConclusion"
+    }
+   ]
+  },
+  "aiserver.v1.GitPullRequestReviewRequestedEvent": {
+   "typeName": "aiserver.v1.GitPullRequestReviewRequestedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.GitIssueAssignedEvent": {
+   "typeName": "aiserver.v1.GitIssueAssignedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "repos",
+     "localName": "repos",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.LinearIssueCreatedEvent": {
+   "typeName": "aiserver.v1.LinearIssueCreatedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.LinearStatusChangedEvent": {
+   "typeName": "aiserver.v1.LinearStatusChangedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "status_ids",
+     "localName": "statusIds",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.LinearEndOfCycleEvent": {
+   "typeName": "aiserver.v1.LinearEndOfCycleEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "cycle_ids",
+     "localName": "cycleIds",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": true,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.PagerDutyIncidentTriggeredEvent": {
+   "typeName": "aiserver.v1.PagerDutyIncidentTriggeredEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.PagerDutyIncidentAcknowledgedEvent": {
+   "typeName": "aiserver.v1.PagerDutyIncidentAcknowledgedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.PagerDutyIncidentResolvedEvent": {
+   "typeName": "aiserver.v1.PagerDutyIncidentResolvedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.PagerDutyIncidentEscalatedEvent": {
+   "typeName": "aiserver.v1.PagerDutyIncidentEscalatedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.PagerDutyIncidentAnyEvent": {
+   "typeName": "aiserver.v1.PagerDutyIncidentAnyEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.SentryIssueCreatedEvent": {
+   "typeName": "aiserver.v1.SentryIssueCreatedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.SentryIssueResolvedEvent": {
+   "typeName": "aiserver.v1.SentryIssueResolvedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.SentryIssueAssignedEvent": {
+   "typeName": "aiserver.v1.SentryIssueAssignedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.SentryIssueArchivedEvent": {
+   "typeName": "aiserver.v1.SentryIssueArchivedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.SentryIssueUnresolvedEvent": {
+   "typeName": "aiserver.v1.SentryIssueUnresolvedEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.SentryIssueAnyEvent": {
+   "typeName": "aiserver.v1.SentryIssueAnyEvent",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": []
+  },
+  "aiserver.v1.McpServerConfig": {
+   "typeName": "aiserver.v1.McpServerConfig",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 4,
+     "name": "id",
+     "localName": "id",
+     "kind": "scalar",
+     "opt": true,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "int64"
+    },
+    {
+     "no": 1,
+     "name": "name",
+     "localName": "name",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    }
+   ]
+  },
+  "aiserver.v1.AgentPrivateWorkerLabel": {
+   "typeName": "aiserver.v1.AgentPrivateWorkerLabel",
+   "file": "aiserver/v1/automations_pb.proto",
+   "fields": [
+    {
+     "no": 1,
+     "name": "key",
+     "localName": "key",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
+    },
+    {
+     "no": 2,
+     "name": "value",
+     "localName": "value",
+     "kind": "scalar",
+     "opt": false,
+     "repeated": false,
+     "oneof": null,
+     "fieldKind": null,
+     "T": "string"
     }
    ]
   },
@@ -166634,6 +169738,73 @@
     }
    ]
   },
+  "aiserver.v1.AutomationScope": {
+   "typeName": "aiserver.v1.AutomationScope",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "AUTOMATION_SCOPE_UNSPECIFIED",
+     "localName": "UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "AUTOMATION_SCOPE_USER",
+     "localName": "USER"
+    },
+    {
+     "no": 2,
+     "name": "AUTOMATION_SCOPE_TEAM",
+     "localName": "TEAM"
+    },
+    {
+     "no": 3,
+     "name": "AUTOMATION_SCOPE_TEAM_VISIBLE",
+     "localName": "TEAM_VISIBLE"
+    },
+    {
+     "no": 4,
+     "name": "AUTOMATION_SCOPE_TEAM_EDITABLE",
+     "localName": "TEAM_EDITABLE"
+    },
+    {
+     "no": 5,
+     "name": "AUTOMATION_SCOPE_TEAM_EDITABLE_USER",
+     "localName": "TEAM_EDITABLE_USER"
+    }
+   ]
+  },
+  "aiserver.v1.AutomationCreationSource": {
+   "typeName": "aiserver.v1.AutomationCreationSource",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "AUTOMATION_CREATION_SOURCE_UNSPECIFIED",
+     "localName": "UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "AUTOMATION_CREATION_SOURCE_PORTAL_WEB",
+     "localName": "PORTAL_WEB"
+    },
+    {
+     "no": 2,
+     "name": "AUTOMATION_CREATION_SOURCE_GLASS_UI",
+     "localName": "GLASS_UI"
+    },
+    {
+     "no": 3,
+     "name": "AUTOMATION_CREATION_SOURCE_SKILL_MCP",
+     "localName": "SKILL_MCP"
+    },
+    {
+     "no": 4,
+     "name": "AUTOMATION_CREATION_SOURCE_CONFIG_AS_CODE",
+     "localName": "CONFIG_AS_CODE"
+    }
+   ]
+  },
   "agent.v1.LocalPromptQualityInvocationStatus": {
    "typeName": "agent.v1.LocalPromptQualityInvocationStatus",
    "file": "agent/v1/agent_service_pb.proto",
@@ -168692,6 +171863,48 @@
     }
    ]
   },
+  "aiserver.v1.SlackCompletionReactionMode": {
+   "typeName": "aiserver.v1.SlackCompletionReactionMode",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "SLACK_COMPLETION_REACTION_MODE_UNSPECIFIED",
+     "localName": "UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "SLACK_COMPLETION_REACTION_MODE_ON",
+     "localName": "ON"
+    },
+    {
+     "no": 2,
+     "name": "SLACK_COMPLETION_REACTION_MODE_OFF",
+     "localName": "OFF"
+    },
+    {
+     "no": 3,
+     "name": "SLACK_COMPLETION_REACTION_MODE_CUSTOM",
+     "localName": "CUSTOM"
+    }
+   ]
+  },
+  "aiserver.v1.AutomationDefaultTool": {
+   "typeName": "aiserver.v1.AutomationDefaultTool",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "AUTOMATION_DEFAULT_TOOL_UNSPECIFIED",
+     "localName": "UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "AUTOMATION_DEFAULT_TOOL_OPEN_GIT_PR",
+     "localName": "OPEN_GIT_PR"
+    }
+   ]
+  },
   "aiserver.v1.AvailableModelsResponse.ModelVendorId": {
    "typeName": "aiserver.v1.AvailableModelsResponse.ModelVendorId",
    "file": "aiserver/v1/aiserver_pb.proto",
@@ -169960,6 +173173,100 @@
     }
    ]
   },
+  "aiserver.v1.PromptEffortLevel": {
+   "typeName": "aiserver.v1.PromptEffortLevel",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "PROMPT_EFFORT_LEVEL_UNSPECIFIED",
+     "localName": "UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "PROMPT_EFFORT_LEVEL_STANDARD",
+     "localName": "STANDARD"
+    },
+    {
+     "no": 10,
+     "name": "PROMPT_EFFORT_LEVEL_HARD",
+     "localName": "HARD"
+    }
+   ]
+  },
+  "aiserver.v1.PromptRunMode": {
+   "typeName": "aiserver.v1.PromptRunMode",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "PROMPT_RUN_MODE_UNSPECIFIED",
+     "localName": "UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "PROMPT_RUN_MODE_SAME_CHAT",
+     "localName": "SAME_CHAT"
+    },
+    {
+     "no": 2,
+     "name": "PROMPT_RUN_MODE_NEW_AGENT",
+     "localName": "NEW_AGENT"
+    }
+   ]
+  },
+  "aiserver.v1.AutomationManagedBy": {
+   "typeName": "aiserver.v1.AutomationManagedBy",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "AUTOMATION_MANAGED_BY_UNSPECIFIED",
+     "localName": "UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "AUTOMATION_MANAGED_BY_UI",
+     "localName": "UI"
+    },
+    {
+     "no": 2,
+     "name": "AUTOMATION_MANAGED_BY_DEPLOY",
+     "localName": "DEPLOY"
+    },
+    {
+     "no": 3,
+     "name": "AUTOMATION_MANAGED_BY_ANY",
+     "localName": "ANY"
+    }
+   ]
+  },
+  "aiserver.v1.McpAuthState": {
+   "typeName": "aiserver.v1.McpAuthState",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "MCP_AUTH_STATE_UNSPECIFIED",
+     "localName": "UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "MCP_AUTH_STATE_UNKNOWN",
+     "localName": "UNKNOWN"
+    },
+    {
+     "no": 2,
+     "name": "MCP_AUTH_STATE_AUTHENTICATED",
+     "localName": "AUTHENTICATED"
+    },
+    {
+     "no": 3,
+     "name": "MCP_AUTH_STATE_NEEDS_AUTH",
+     "localName": "NEEDS_AUTH"
+    }
+   ]
+  },
   "agent.v1.ThinkingStyle": {
    "typeName": "agent.v1.ThinkingStyle",
    "file": "agent/v1/agent_pb.proto",
@@ -171133,6 +174440,109 @@
      "no": 4,
      "name": "SCROLL_DIRECTION_RIGHT",
      "localName": "RIGHT"
+    }
+   ]
+  },
+  "aiserver.v1.GitPullRequestAction": {
+   "typeName": "aiserver.v1.GitPullRequestAction",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "GIT_PULL_REQUEST_ACTION_UNSPECIFIED",
+     "localName": "UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "GIT_PULL_REQUEST_ACTION_OPENED",
+     "localName": "OPENED"
+    },
+    {
+     "no": 2,
+     "name": "GIT_PULL_REQUEST_ACTION_PUSHED",
+     "localName": "PUSHED"
+    },
+    {
+     "no": 3,
+     "name": "GIT_PULL_REQUEST_ACTION_MERGED",
+     "localName": "MERGED"
+    },
+    {
+     "no": 4,
+     "name": "GIT_PULL_REQUEST_ACTION_COMMENTED",
+     "localName": "COMMENTED"
+    },
+    {
+     "no": 5,
+     "name": "GIT_PULL_REQUEST_ACTION_DRAFT_OPENED",
+     "localName": "DRAFT_OPENED"
+    },
+    {
+     "no": 6,
+     "name": "GIT_PULL_REQUEST_ACTION_LABELED",
+     "localName": "LABELED"
+    },
+    {
+     "no": 7,
+     "name": "GIT_PULL_REQUEST_ACTION_UNLABELED",
+     "localName": "UNLABELED"
+    }
+   ]
+  },
+  "aiserver.v1.GitCICompletionCondition": {
+   "typeName": "aiserver.v1.GitCICompletionCondition",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "GIT_CI_COMPLETION_CONDITION_UNSPECIFIED",
+     "localName": "GIT_CI_COMPLETION_CONDITION_UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "GIT_CI_COMPLETION_CONDITION_FAILURE",
+     "localName": "GIT_CI_COMPLETION_CONDITION_FAILURE"
+    },
+    {
+     "no": 2,
+     "name": "GIT_CI_COMPLETION_CONDITION_SUCCESS",
+     "localName": "GIT_CI_COMPLETION_CONDITION_SUCCESS"
+    },
+    {
+     "no": 3,
+     "name": "GIT_CI_COMPLETION_CONDITION_ANY",
+     "localName": "GIT_CI_COMPLETION_CONDITION_ANY"
+    }
+   ]
+  },
+  "aiserver.v1.GitWorkflowRunConclusion": {
+   "typeName": "aiserver.v1.GitWorkflowRunConclusion",
+   "file": "aiserver/v1/automations_pb.proto",
+   "values": [
+    {
+     "no": 0,
+     "name": "GIT_WORKFLOW_RUN_CONCLUSION_UNSPECIFIED",
+     "localName": "UNSPECIFIED"
+    },
+    {
+     "no": 1,
+     "name": "GIT_WORKFLOW_RUN_CONCLUSION_ANY",
+     "localName": "ANY"
+    },
+    {
+     "no": 2,
+     "name": "GIT_WORKFLOW_RUN_CONCLUSION_SUCCESS",
+     "localName": "SUCCESS"
+    },
+    {
+     "no": 3,
+     "name": "GIT_WORKFLOW_RUN_CONCLUSION_FAILURE",
+     "localName": "FAILURE"
+    },
+    {
+     "no": 4,
+     "name": "GIT_WORKFLOW_RUN_CONCLUSION_CANCELLED",
+     "localName": "CANCELLED"
     }
    ]
   },

@@ -1,7 +1,5 @@
 # devbox_bot — Grok Bot ↔ DevBox bridge (plugin/bot)
 
-> Vendored from DevBox `plugin/bot/` at source commit `8533be0a` (2026-10-02).
-
 A standalone backend that lets the Grok Bot desktop (Cursor fork) run
 entirely against a DevBox deployment — sign-in, account, box allocation
 and inference — **with zero DevBox code changes** and *not* as a
@@ -43,12 +41,31 @@ It accepts allow-listed credentials over guest port 7813, writes
 turn. `GET /health` reports `awaiting`, `provisioning`, or `provisioned`;
 `GET /status` reports the current startup phase, process pids, disk and
 `/home/box` details, and a redacted tail of the startup logs.
-`start-box.sh` uses the packaged Node runtime and HTTP/1.1 retry flags for
-runtime-pack downloads.
+`start-box.sh` checks free space before downloading a runtime pack, resumes
+partial chunks only while the published checksum is unchanged, and verifies
+and extracts the pack in a staging directory before replacing the live
+runtime. It syntax-checks and atomically installs the packaged startup script,
+restoring the old pack if activation fails. Long-lived services do not inherit
+the startup lock, so later relaunches can refresh the pack. It idempotently
+links packed box scripts into `/usr/local/bin` and links `/workspace` to the
+exec-daemon's workspace root when the image does not provide that path. If the
+image has `/usr/bin/Xvfb` but no `box-xvfb` wrapper, it links the expected
+wrapper path to the system binary.
 
 `devbox_bot.box` runs inside the box VM and serves `/sand-box/inference-credential` +
 `InferenceService.Stream` so the in-box host-main's model calls end at
 your OpenAI-compatible endpoint instead of Cursor.
+
+The runtime pack also includes the fork's bundled box exec-daemon at
+`opt-sand/box-exec-daemon/main.cjs`. Build it from the fork with
+`node scripts/build-box-exec-daemon.mjs <out>`, then pass the output to
+`plugin/bot/tools/repack_runtime_pack.py --box-exec-daemon <out>` when
+repacking. The repacker stores it with mode `0644`. `start-box.sh` starts the
+daemon on `127.0.0.1:1337` and launches host-main with
+`SAND_USE_EXISTING_BOX_EXEC_DAEMON=1`, so packaged host builds reuse the
+daemon without starting a duplicate. It also carries the exact
+`start-box.sh` at `opt-sand/grok-bot-box/start-box.sh` so an existing box can
+install a verified startup-script update from the runtime pack.
 
 ## Run
 

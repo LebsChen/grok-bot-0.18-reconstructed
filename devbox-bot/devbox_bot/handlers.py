@@ -9,8 +9,54 @@ methods the desktop shell does; without them it only sees empty defaults.
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import time
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+_FEATURE_GATE_MANIFEST = json.loads(
+    Path(__file__).with_name("feature_gates.json").read_text(
+        encoding="utf-8"))
+_FEATURE_GATE_DEFAULTS = _FEATURE_GATE_MANIFEST.get("gates")
+if (not isinstance(_FEATURE_GATE_DEFAULTS, dict)
+        or len(_FEATURE_GATE_DEFAULTS) != 608
+        or any(not isinstance(value, bool)
+               for value in _FEATURE_GATE_DEFAULTS.values())):
+    raise ValueError("feature_gates.json must contain 608 boolean gates")
+
+DEVBOX_GATE_OVERRIDES = frozenset({
+    "sand_agent_network",
+    "sand_multiplayer",
+    "sand_teach_by_demonstration",
+    "sand_memory_dreaming",
+    "sand_browser_use_subagent",
+    "sand_usage_page",
+    "sand_action_audit_logs",
+    "sand_get_grok_bot_ios",
+    "sand_special_settings",
+    "sand_auto_disk_saver",
+    "sand_computer_use_unicode_typing",
+})
+
+
+def _statsig_feature_gates() -> dict[str, bool]:
+    gates = dict(_FEATURE_GATE_DEFAULTS)
+    gates.update({name: True for name in DEVBOX_GATE_OVERRIDES})
+    for entry in os.environ.get("GROKBOT_FEATURE_GATES", "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        enabled = not entry.startswith("!")
+        name = entry[1:].strip() if not enabled else entry
+        if name not in gates:
+            log.warning("ignoring unknown GROKBOT_FEATURE_GATES name %r",
+                        name)
+            continue
+        gates[name] = enabled
+    return gates
 
 
 def register(router, get_identity, catalog) -> None:
@@ -64,8 +110,37 @@ def register(router, get_identity, catalog) -> None:
         return {"state": 3}  # RUNNING
 
     @router.unary("aiserver.v1.AnalyticsService", "BootstrapStatsig")
-    def _statsig(_req, _ctx):
-        return {"config": "", "generated_at_ms": int(time.time() * 1000)}
+    def _statsig(_req, ctx):
+        generated_at_ms = int(time.time() * 1000)
+        user_id = (get_identity(ctx) or {}).get("user_id")
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("BootstrapStatsig requires an identity user_id")
+        feature_gates = {
+            name: {
+                "name": name,
+                "value": value,
+                "rule_id": "devbox",
+                "id_type": "userID",
+                "secondary_exposures": [],
+            }
+            for name, value in sorted(_statsig_feature_gates().items())
+        }
+        config = {
+            "feature_gates": feature_gates,
+            "dynamic_configs": {},
+            "layer_configs": {},
+            "param_stores": {},
+            "has_updates": True,
+            "hash_used": "none",
+            "time": generated_at_ms,
+            "user": {"userID": user_id},
+            "response_format": "init-v1",
+            "generator": "devbox",
+        }
+        return {
+            "config": json.dumps(config, separators=(",", ":")),
+            "generated_at_ms": generated_at_ms,
+        }
 
     @router.unary("aiserver.v1.AiService", "AvailableModels")
     def _models(_req, _ctx):

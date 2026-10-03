@@ -27,17 +27,27 @@ const SCALAR = {
 };
 
 const services = [];
+const selectedAutomationMethods = new Set([
+  "CreateSandAutomation",
+  "ListSandAutomations",
+  "GetSandAutomation",
+  "UpdateSandAutomation",
+  "DeleteSandAutomation",
+]);
 for (const connectFile of process.argv.slice(3).length
     ? process.argv.slice(3)
     : ["aiserver/v1/aiserver_connect.js", "aiserver/v1/dashboard_connect.js",
        "aiserver/v1/grok_bot_connect.js", "aiserver/v1/inference_connect.js",
-       "aiserver/v1/analytics_connect.js", "agent/v1/agent_service_connect.js"]) {
+       "aiserver/v1/analytics_connect.js", "aiserver/v1/automations_connect.js",
+       "agent/v1/agent_service_connect.js"]) {
   const mod = await import(pathToFileURL(path.join(compileRoot, connectFile.replace(/\.mjs$/, ".js"))).href);
   for (const value of Object.values(mod)) {
     if (value == null || typeof value !== "object" || typeof value.typeName !== "string"
         || value.methods == null) continue;
     const methods = {};
     for (const [key, m] of Object.entries(value.methods)) {
+      if (value.typeName === "aiserver.v1.AutomationsService"
+          && !selectedAutomationMethods.has(m.name)) continue;
       methods[key] = {
         name: m.name,
         kind: typeof m.kind === "number" ? m.kind : String(m.kind),

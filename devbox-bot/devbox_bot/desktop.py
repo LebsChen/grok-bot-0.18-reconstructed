@@ -48,6 +48,10 @@ from .inference import stream_inference
 log = logging.getLogger("devbox_bot.desktop")
 
 BOX_TAG = "grok-bot-box"
+KEEP_ALIVE_DURATION_MINUTES = 1440
+KEEP_ALIVE_RENEWAL_WINDOW_MS = 12 * 60 * 60 * 1000
+KEEP_ALIVE_DURATION_MS = KEEP_ALIVE_DURATION_MINUTES * 60 * 1000
+BOX_WAKE_MESSAGE = "Continue."
 BOX_PROMPT = (
     "This session hosts the Grok Bot box runtime. Do not run commands or "
     "stage/start services unless a follow-up message explicitly asks you "
@@ -207,7 +211,7 @@ class DesktopBackend:
             return self._identity_cache[api.token]
         try:
             body = api.current_membership()
-        except Exception:  # noqa: BLE001 — identity lookup is best-effort
+        except Exception:  # noqa: BLE001
             body = {}
         org = body.get("org") if isinstance(body.get("org"), dict) else {}
         user = body.get("user") if isinstance(
@@ -363,15 +367,48 @@ class DesktopBackend:
 
     def _save_box_state(self, ident: dict, box: dict) -> None:
         boxes = dict(self.state.data.get("box") or {})
-        boxes[self._box_key(ident)] = box
+        persisted = dict(box)
+        persisted.pop("share_credential", None)
+        boxes[self._box_key(ident)] = persisted
         self.state.data["box"] = boxes
         self.state.save()
 
+    def _ensure_keep_alive(self, api: DevBoxApi, session_id: str,
+                           box: dict) -> None:
+        now_ms = int(time.time() * 1000)
+        try:
+            keep_alive_until_ms = int(box.get("keep_alive_until_ms") or 0)
+        except (TypeError, ValueError):
+            keep_alive_until_ms = 0
+        if keep_alive_until_ms >= now_ms + KEEP_ALIVE_RENEWAL_WINDOW_MS:
+            return
+        try:
+            api.call(
+                "POST", f"/api/sessions/{session_id}/keep-alive",
+                json_body={
+                    "keep_alive": True,
+                    "duration_minutes": KEEP_ALIVE_DURATION_MINUTES,
+                })
+        except Exception as exc:  # noqa: BLE001
+            log.warning("session keep-alive renewal failed status=%s",
+                        getattr(exc, "status", None))
+            return
+        box["keep_alive_until_ms"] = (
+            int(time.time() * 1000) + KEEP_ALIVE_DURATION_MS)
+        ident = self._identity(api)
+        self._save_box_state(ident, box)
+
     def _provision_payload(self, ident: dict, org_id: str,
-                           box: dict) -> dict[str, str]:
+                           box: dict,
+                           share_credential: str | None = None) -> dict[str, str]:
+        share_credential = share_credential or box.get(
+            "share_credential", "")
         payload = {
             "GROKBOT_GATEWAY_TOKEN": box["gateway_token"],
             "GROKBOT_INFERENCE_CREDENTIAL": box["inference_credential"],
+            "GROKBOT_SHARE_CREDENTIAL": share_credential,
+            "DEVBOX_WEBAPP_ORIGIN": os.environ.get(
+                "DEVBOX_WEBAPP_ORIGIN", self.devbox_origin),
             "GROKBOT_RUNTIME_URL": os.environ.get(
                 "GROKBOT_RUNTIME_URL", ""),
             "GROKBOT_USER_JSON": json.dumps({
@@ -395,6 +432,96 @@ class DesktopBackend:
                     "GROKBOT_ASSET_ORIGIN",
                     "https://app.devinai.net/internal/harness-llm/v1"))
         return payload
+
+    def _set_session_asset_token(
+            self, api: DevBoxApi, session_id: str,
+            payload: dict[str, str]) -> None:
+        if payload.get("DEVBOX_HARNESS_LLM_TOKEN"):
+            return
+        asset_session_id = session_id
+        if not asset_session_id.startswith("devin-"):
+            asset_session_id = f"devin-{asset_session_id}"
+        try:
+            result = api.call(
+                "POST", "/api/grokbot/sand/asset-token",
+                json_body={"session_id": asset_session_id})
+        except Exception as exc:  # noqa: BLE001 — mirror auth is optional
+            log.warning("box asset-token request failed status=%s",
+                        getattr(exc, "status", None))
+            return
+        token = result.get("token") if isinstance(result, dict) else None
+        base_url = result.get("base_url") if isinstance(result, dict) else None
+        if (not isinstance(token, str) or not token
+                or not isinstance(base_url, str) or not base_url):
+            log.warning("box asset-token response failed status=200")
+            return
+        payload["DEVBOX_HARNESS_LLM_TOKEN"] = token
+        payload["DEVBOX_HARNESS_LLM_OPENAI_BASE_URL"] = base_url
+
+    def _mint_share_credential(
+            self, api: DevBoxApi, expected_auth_id: str) -> tuple[str, int]:
+        try:
+            result = api.call(
+                "POST", "/api/grokbot/sand/share-credential",
+                json_body={})
+        except Exception as exc:
+            raise ConnectError(
+                "unavailable",
+                "control plane could not mint a sharing credential") from exc
+        if not isinstance(result, dict):
+            raise ConnectError(
+                "unavailable", "control plane returned an invalid "
+                "sharing credential")
+        credential = result.get("credential")
+        auth_id = result.get("authId")
+        expires_at_ms = result.get("expiresAtMs")
+        if (not isinstance(credential, str) or not credential
+                or auth_id != expected_auth_id
+                or not isinstance(expires_at_ms, int)):
+            raise ConnectError(
+                "unavailable", "control plane returned an invalid "
+                "sharing credential")
+        return credential, expires_at_ms
+
+    def _update_box_share_credential(
+            self, api: DevBoxApi, session_id: str, ident: dict,
+            org_id: str, box: dict) -> None:
+        credential, expires_at_ms = self._mint_share_credential(
+            api, str(ident.get("user_id") or ""))
+        payload = self._provision_payload(
+            ident, org_id, box, credential)
+        status, result = self._provision_relay(
+            api, session_id, "/provision/update", payload)
+        if status != 202:
+            raise ConnectError(
+                "unavailable",
+                "existing box rejected the sharing credential update")
+        expected_attempts = result.get("startBoxAttempts", 0)
+        deadline = time.monotonic() + PROVISION_WAIT_S
+        while time.monotonic() < deadline:
+            status, state = self._provision_relay(
+                api, session_id, "/status")
+            if status == 200:
+                if state.get("phase") == "start-box-failed":
+                    raise ConnectError(
+                        "unavailable",
+                        "existing box failed to restart after credential update")
+                process = state.get("pids", {}).get("start_box", {})
+                if (state.get("state") == "provisioned"
+                        and state.get("start_box_exit_code") == 0
+                        and state.get("start_box_attempts", 0)
+                        >= expected_attempts
+                        and not process.get("alive", False)):
+                    box.pop("share_credential", None)
+                    box["share_credential_expires_at_ms"] = expires_at_ms
+                    self._save_box_state(ident, box)
+                    return
+            elif status not in (0, 502, 503, 504):
+                break
+            time.sleep(2)
+        raise ConnectError(
+            "unavailable",
+            "existing box did not finish its credential update")
 
     def _provision_relay(self, api: DevBoxApi, session_id: str,
                          path: str,
@@ -444,6 +571,7 @@ class DesktopBackend:
         payload = self._provision_payload(ident, org_id, box)
         deadline = time.monotonic() + PROVISION_WAIT_S
         reachable = False
+        asset_token_attempted = False
         while time.monotonic() < deadline:
             status, body = self._provision_relay(
                 api, session_id, "/health")
@@ -451,6 +579,10 @@ class DesktopBackend:
                 reachable = True
                 state = body.get("state")
                 if state == "awaiting":
+                    if not asset_token_attempted:
+                        asset_token_attempted = True
+                        self._set_session_asset_token(
+                            api, session_id, payload)
                     post_status, _post_body = self._provision_relay(
                         api, session_id, "/provision", payload)
                     if post_status in (202, 409):
@@ -491,38 +623,63 @@ class DesktopBackend:
         if session_id:
             try:
                 sess = api.get_session(org_id, session_id)
-                status = str(sess.get("status", "")).lower()
-                if status not in {"finished", "error", "expired",
-                                  "deleted", "archived"}:
-                    coords = self._gateway_coords(api, session_id, box)
-                    if coords:
-                        coords["provision_path"] = box.get(
-                            "provision_path", "provision")
-                        return coords
-                    if not box.get("inference_credential"):
-                        box["inference_credential"] = (
-                            secrets.token_urlsafe(32))
-                    box["provision_path"] = self._provision_listener(
-                        api, org_id, session_id, box, ident)
-                    self._save_box_state(ident, box)
-                    coords = self._await_gateway(api, session_id, box)
-                    coords["provision_path"] = box["provision_path"]
-                    log.info("box %s ready via %s", session_id,
-                             box["provision_path"])
-                    return coords
-            except Exception as exc:  # noqa: BLE001 — stale box state is fine
-                log.debug("existing box check failed: %s", exc)
+            except Exception as exc:
+                raise ConnectError(
+                    "unavailable",
+                    "existing box could not be checked") from exc
+            status = str(sess.get("status", "")).lower()
+            if status in {"finished", "error", "expired",
+                          "deleted", "archived"}:
+                raise ConnectError(
+                    "unavailable", "existing box session is no longer active")
+            if status in {"suspended", "stopped"}:
+                try:
+                    api.send_message(org_id, session_id, BOX_WAKE_MESSAGE)
+                except Exception as exc:
+                    log.warning("existing box wake failed status=%s",
+                                getattr(exc, "status", None))
+                    raise ConnectError(
+                        "unavailable",
+                        "existing box session could not be woken") from exc
+            share_expiry = int(box.get("share_credential_expires_at_ms", 0))
+            if share_expiry <= int(time.time() * 1000) \
+                    + 7 * 24 * 60 * 60 * 1000:
+                self._update_box_share_credential(
+                    api, session_id, ident, org_id, box)
+            coords = self._gateway_coords(api, session_id, box)
+            if coords:
+                coords["provision_path"] = box.get(
+                    "provision_path", "provision")
+                self._ensure_keep_alive(api, session_id, box)
+                return coords
+            if not box.get("inference_credential"):
+                box["inference_credential"] = secrets.token_urlsafe(32)
+            box["provision_path"] = self._provision_listener(
+                api, org_id, session_id, box, ident)
+            self._save_box_state(ident, box)
+            coords = self._await_gateway(api, session_id, box)
+            coords["provision_path"] = box["provision_path"]
+            log.info("box %s ready via %s", session_id,
+                     box["provision_path"])
+            self._ensure_keep_alive(api, session_id, box)
+            return coords
         # create a fresh box session
         gateway_token = secrets.token_urlsafe(32)
         inference_credential = secrets.token_urlsafe(32)
+        share_credential, share_expires_at_ms = \
+            self._mint_share_credential(
+                api, str(ident.get("user_id") or ""))
         secret_ids = self._llm_secret_ids(api, org_id)
         box = {
             "session_id": "",
             "gateway_token": gateway_token,
             "inference_credential": inference_credential,
+            "share_credential": share_credential,
+            "share_credential_expires_at_ms": share_expires_at_ms,
             "created_at": time.time(),
         }
-        payload = self._provision_payload(ident, org_id, box)
+        payload = self._provision_payload(
+            ident, org_id, box, share_credential)
         session_secrets = [{
             "key": key,
             "value": value,
@@ -550,12 +707,13 @@ class DesktopBackend:
         coords = self._await_gateway(api, session_id, box)
         coords["provision_path"] = box["provision_path"]
         log.info("box %s ready via %s", session_id, box["provision_path"])
+        self._ensure_keep_alive(api, session_id, box)
         return coords
 
     def _default_org(self, api: DevBoxApi) -> str:
         try:
             body = api.call("GET", "/v3/organizations")
-        except Exception:  # noqa: BLE001 — org listing is best-effort
+        except Exception:  # noqa: BLE001
             body = {}
         orgs = body.get("organizations") if isinstance(
             body, dict) else body
@@ -566,7 +724,7 @@ class DesktopBackend:
     def _llm_secret_ids(self, api: DevBoxApi, org_id: str) -> list[str]:
         try:
             secrets_list = api.list_secrets(org_id)
-        except Exception:  # noqa: BLE001 — secrets are optional
+        except Exception:  # noqa: BLE001
             return []
         wanted = {"GROKBOT_LLM_BASE_URL", "GROKBOT_LLM_API_KEY",
                   "GROKBOT_LLM_MODEL"}
@@ -582,7 +740,7 @@ class DesktopBackend:
             body = api.call(
                 "PUT", f"/api/preview-link/{session_id}"
                        f"?local_port={port}")
-        except Exception:  # noqa: BLE001 — capability mint may 404/503
+        except Exception:  # noqa: BLE001
             return None
         if isinstance(body, dict) and body.get("url"):
             return body
@@ -608,7 +766,7 @@ class DesktopBackend:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 if resp.status != 200:
                     return None
-        except Exception:  # noqa: BLE001 — health probe may fail early
+        except Exception:  # noqa: BLE001
             return None
         ident = self._identity(api)
         return {
@@ -643,7 +801,7 @@ class DesktopBackend:
         if session_id:
             try:
                 api.delete_session(org_id, session_id)
-            except Exception as exc:  # noqa: BLE001 — recreate is best-effort
+            except Exception as exc:  # noqa: BLE001
                 log.debug("box session delete failed: %s", exc)
             self._save_box_state(ident, {})
         self._ensure_box(ctx)
@@ -663,7 +821,7 @@ class DesktopBackend:
                 state = 3 if status not in {
                     "finished", "error", "expired", "deleted",
                     "archived"} else 1
-            except Exception:  # noqa: BLE001 — missing session = ABSENT
+            except Exception:  # noqa: BLE001
                 state = 1
         return {"state": state}
 
